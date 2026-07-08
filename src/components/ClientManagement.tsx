@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { calculateExpiryDate, formatCurrency, formatDate } from '../utils';
 import { Client, Payment, ClientPackage } from '../types';
+import { defaultLogo, defaultQr } from '../defaultAssets';
 import { 
   Plus, 
   Search, 
@@ -67,11 +68,26 @@ export const ClientManagement: React.FC = () => {
     followUps,
     addFollowUp,
     updateFollowUp,
-    deleteFollowUp
+    deleteFollowUp,
+    brandSettings
   } = useCRM();
 
   // Action state trackers
   const [isTelegramSending, setIsTelegramSending] = useState<Record<string, boolean>>({});
+  const [isFollowUpTelegramSending, setIsFollowUpTelegramSending] = useState<Record<string, boolean>>({});
+
+  const handleSendFollowUpTelegram = async (f: any) => {
+    setIsFollowUpTelegramSending(prev => ({ ...prev, [f.id]: true }));
+    try {
+      await sendTelegramNotification("", "followup_created", f);
+      alert(`Success: Telegram notification sent for scheduled task!`);
+    } catch (err: any) {
+      console.error("Failed to send Telegram follow-up:", err);
+      alert(`Error sending Telegram follow-up: ${err.message || err}`);
+    } finally {
+      setIsFollowUpTelegramSending(prev => ({ ...prev, [f.id]: false }));
+    }
+  };
   
   // Follow-up modal state
   const [isFollowUpOpen, setIsFollowUpOpen] = useState(false);
@@ -89,6 +105,13 @@ export const ClientManagement: React.FC = () => {
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [newReschedDate, setNewReschedDate] = useState('');
   const [newReschedTime, setNewReschedTime] = useState('');
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // Delete confirmation state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -767,10 +790,10 @@ export const ClientManagement: React.FC = () => {
                       onClick={() => handleSendTelegramUpdate(client)}
                       disabled={isTelegramSending[client.id]}
                       className="flex items-center gap-2 px-3 py-2 bg-emerald-500/5 hover:bg-emerald-500 border border-emerald-500/10 hover:border-emerald-500 text-emerald-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
-                      title="Send Profile to Telegram Group"
+                      title="Push client details to Telegram Group"
                     >
                       <Send className="h-3.5 w-3.5 shrink-0" />
-                      {isTelegramSending[client.id] ? 'Sending...' : 'Send Telegram'}
+                      {isTelegramSending[client.id] ? 'Sending...' : 'Push to Telegram'}
                     </button>
 
                     {/* 2. Add Payment */}
@@ -1381,7 +1404,7 @@ export const ClientManagement: React.FC = () => {
                         className="flex items-center gap-2.5 px-3 py-2.5 bg-emerald-500/5 hover:bg-emerald-500 border border-emerald-500/10 hover:border-emerald-500 text-emerald-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer"
                       >
                         <Send className="h-4 w-4 shrink-0" />
-                        {isTelegramSending[selectedClient.id] ? 'Sending to Telegram...' : 'Send Telegram Update'}
+                        {isTelegramSending[selectedClient.id] ? 'Sending to Telegram...' : 'Push to Telegram'}
                       </button>
 
                       {/* 2. Add Payment */}
@@ -1866,9 +1889,33 @@ export const ClientManagement: React.FC = () => {
                                     </>
                                   )}
                                   <button
+                                    id={`push-followup-${f.id}`}
+                                    disabled={isFollowUpTelegramSending[f.id]}
+                                    onClick={() => handleSendFollowUpTelegram(f)}
+                                    className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold rounded text-[10px] transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                                    title="Push to Telegram"
+                                  >
+                                    <Send className="h-3 w-3 shrink-0" />
+                                    {isFollowUpTelegramSending[f.id] ? 'Pushing...' : 'Push to Telegram'}
+                                  </button>
+                                  <button
                                     onClick={async () => {
-                                      if (window.confirm("Are you sure you want to delete this follow-up?")) {
+                                      try {
                                         await deleteFollowUp(f.id);
+                                        showToast("✅ Deleted successfully.", "success");
+                                      } catch (err: any) {
+                                        console.error(err);
+                                        const errMsg = err instanceof Error ? err.message : String(err);
+                                        let readableMsg = errMsg;
+                                        try {
+                                          const parsed = JSON.parse(errMsg);
+                                          if (parsed && parsed.error) {
+                                            readableMsg = parsed.error;
+                                          }
+                                        } catch (pErr) {
+                                          // Not JSON
+                                        }
+                                        showToast(`❌ Failed to delete: ${readableMsg}`, "error");
                                       }
                                     }}
                                     className="p-1.5 bg-[#141414] hover:bg-rose-950 text-gray-500 hover:text-rose-400 rounded transition-colors"
@@ -2264,10 +2311,20 @@ export const ClientManagement: React.FC = () => {
             <div className="p-8 bg-white text-slate-900 overflow-y-auto flex-1 font-sans print:p-0">
               {/* Invoice Brand Header */}
               <div className="flex justify-between items-start border-b-2 border-emerald-600 pb-6">
-                <div>
-                  <h2 className="text-2xl font-black text-emerald-700 tracking-tight">AB GRAPHICS</h2>
-                  <p className="text-xs text-slate-500 font-semibold mt-0.5">Corporate Branding & Marketing Solutions</p>
-                  <p className="text-xs text-slate-400 mt-2">support@abgraphics.co | GSTIN: 27AABCA1234F1Z5</p>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl bg-transparent flex items-center justify-center p-1 shrink-0 overflow-hidden border border-emerald-100">
+                    <img 
+                      src={brandSettings?.logo || defaultLogo} 
+                      alt="Company Logo" 
+                      className="max-h-full max-w-full object-contain mx-auto"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black text-emerald-700 tracking-tight">AB GRAPHICS</h2>
+                    <p className="text-xs text-slate-500 font-semibold mt-0.5">Corporate Branding & Marketing Solutions</p>
+                    <p className="text-xs text-slate-400 mt-2">support@abgraphics.co | GSTIN: 27AABCA1234F1Z5</p>
+                  </div>
                 </div>
                 <div className="text-right">
                   <h1 className="text-xl font-bold uppercase tracking-widest text-slate-400">INVOICE</h1>
@@ -2359,6 +2416,30 @@ export const ClientManagement: React.FC = () => {
                 </div>
               )}
 
+              {/* UPI Payment Scan Section */}
+              <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between gap-6 bg-slate-50 p-5 rounded-2xl print:bg-white print:p-0 print:border-none">
+                <div className="space-y-2 max-w-sm text-left">
+                  <h4 className="text-xs font-extrabold text-emerald-800 uppercase tracking-widest flex items-center gap-1.5">⚡ Instant UPI Payment</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Scan this QR code from any UPI app (GPay, PhonePe, Paytm, BHIM) to settle your outstanding campaign dues instantly.
+                  </p>
+                  <div className="text-[11px] font-mono text-slate-500 bg-white border border-slate-100 rounded-lg px-3 py-1.5 flex items-center justify-between print:bg-transparent">
+                    <span>UPI ID: 9307643461@axl</span>
+                  </div>
+                </div>
+                <div className="shrink-0 flex flex-col items-center gap-1.5">
+                  <div className="w-36 h-48 bg-white border border-slate-200/60 rounded-xl p-2 shadow-sm flex items-center justify-center overflow-hidden">
+                    <img 
+                      src={brandSettings?.qr || defaultQr} 
+                      alt="UPI QR Payment" 
+                      className="max-h-full max-w-full object-contain mx-auto"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">AB Graphics Merchant QR</span>
+                </div>
+              </div>
+
               {/* Footer Terms */}
               <div className="mt-12 pt-6 border-t border-slate-100 text-center text-[10px] text-slate-400 leading-relaxed">
                 <p className="font-semibold text-slate-500">Thank you for your business!</p>
@@ -2408,6 +2489,16 @@ export const ClientManagement: React.FC = () => {
               </button>
             </div>
           </motion.div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-[110] flex items-center gap-2 px-4 py-3 rounded-xl border shadow-2xl transition-all duration-300 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-300' 
+            : 'bg-rose-950/90 border-rose-500/30 text-rose-300'
+        }`}>
+          <span className="text-sm font-medium">{toast.message}</span>
         </div>
       )}
 

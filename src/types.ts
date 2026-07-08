@@ -72,6 +72,11 @@ export interface TelegramSettings {
   enabled: boolean;
 }
 
+export interface BrandSettings {
+  logo?: string; // Base64 or URL of custom logo
+  qr?: string;   // Base64 or URL of custom QR code
+}
+
 export interface Activity {
   id: string;
   type: 'client_added' | 'client_updated' | 'client_deleted' | 'lead_added' | 'lead_converted' | 'lead_updated' | 'task_added' | 'task_completed' | 'payment_updated' | 'followup_added' | 'followup_updated' | 'followup_deleted';

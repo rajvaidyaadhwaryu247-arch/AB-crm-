@@ -18,7 +18,8 @@ import {
   Filter, 
   CheckSquare, 
   TrendingUp,
-  RotateCw
+  RotateCw,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -26,7 +27,7 @@ const TASK_TYPES = ['Shoot', 'Editing', 'Poster', 'Ads', 'Website', 'Printing'] 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Completed'] as const;
 
 export const TaskManagement: React.FC = () => {
-  const { tasks, clients, addTask, updateTask, deleteTask } = useCRM();
+  const { tasks, clients, addTask, updateTask, deleteTask, sendTelegramNotification } = useCRM();
 
   // Search and Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,9 +35,37 @@ export const TaskManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [clientFilter, setClientFilter] = useState<string>('All');
 
+  const [isTaskTelegramSending, setIsTaskTelegramSending] = useState<Record<string, boolean>>({});
+
+  const handleSendTaskTelegram = async (task: Task) => {
+    setIsTaskTelegramSending(prev => ({ ...prev, [task.id]: true }));
+    try {
+      const matchedClient = clients.find(c => c.id === task.clientId);
+      const businessName = matchedClient ? matchedClient.businessName : 'N/A';
+
+      await sendTelegramNotification("", "followup_created", {
+        ...task,
+        businessName
+      });
+      alert(`Success: Telegram notification sent for task!`);
+    } catch (err: any) {
+      console.error("Failed to send Telegram task:", err);
+      alert(`Error sending Telegram task: ${err.message || err}`);
+    } finally {
+      setIsTaskTelegramSending(prev => ({ ...prev, [task.id]: false }));
+    }
+  };
+
   // Modal State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // Form Fields State
   const [title, setTitle] = useState('');
@@ -118,12 +147,22 @@ export const TaskManagement: React.FC = () => {
 
   // Handle delete
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this task?")) {
+    try {
+      await deleteTask(id);
+      showToast("✅ Deleted successfully.", "success");
+    } catch (err: any) {
+      console.error(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      let readableMsg = errMsg;
       try {
-        await deleteTask(id);
-      } catch (err) {
-        console.error(err);
+        const parsed = JSON.parse(errMsg);
+        if (parsed && parsed.error) {
+          readableMsg = parsed.error;
+        }
+      } catch (pErr) {
+        // Not JSON
       }
+      showToast(`❌ Failed to delete: ${readableMsg}`, "error");
     }
   };
 
@@ -333,6 +372,15 @@ export const TaskManagement: React.FC = () => {
                   {/* Edit/Delete Buttons */}
                   <div className="flex items-center gap-2">
                     <button
+                      id={`push-task-${task.id}`}
+                      disabled={isTaskTelegramSending[task.id]}
+                      onClick={() => handleSendTaskTelegram(task)}
+                      className="p-2 bg-[#0d0d0d] hover:bg-emerald-500/10 border border-emerald-900/10 text-emerald-400 hover:text-emerald-300 rounded-lg transition-colors cursor-pointer"
+                      title="Push to Telegram"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                    <button
                       onClick={() => openEditModal(task)}
                       className="p-2 bg-[#0d0d0d] hover:bg-[#1c1c1c] border border-emerald-900/10 text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                       title="Edit Task"
@@ -470,6 +518,16 @@ export const TaskManagement: React.FC = () => {
               </div>
             </form>
           </motion.div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-2xl transition-all duration-300 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-300' 
+            : 'bg-rose-950/90 border-rose-500/30 text-rose-300'
+        }`}>
+          <span className="text-sm font-medium">{toast.message}</span>
         </div>
       )}
 

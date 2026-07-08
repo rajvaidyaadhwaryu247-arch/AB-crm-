@@ -10,8 +10,10 @@ import {
   Sparkle,
   ClipboardList,
   BarChart3,
-  Send
+  Settings
 } from 'lucide-react';
+import { useCRM } from '../context/CRMContext';
+import { defaultLogo } from '../defaultAssets';
 // Removed firebase auth imports for single-user authentication-free experience
 
 interface CRMLayoutProps {
@@ -30,6 +32,7 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
   setActiveTab, 
   user 
 }) => {
+  const { brandSettings } = useCRM();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navigation = [
@@ -38,7 +41,7 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
     { name: 'Lead Management', value: 'leads' as const, icon: Sparkles },
     { name: 'Task Management', value: 'tasks' as const, icon: ClipboardList },
     { name: 'Reports', value: 'reports' as const, icon: BarChart3 },
-    { name: 'Telegram Settings', value: 'telegram' as const, icon: Send },
+    { name: 'Settings', value: 'telegram' as const, icon: Settings },
   ];
 
   const handleBackToDashboard = () => {
@@ -52,7 +55,14 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
       <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-[#0d0d0d] border-r border-emerald-900/30 z-30">
         {/* Sidebar Header */}
         <div className="flex items-center gap-3 h-16 px-6 border-b border-emerald-900/20">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center font-bold text-black text-sm shrink-0">AB</div>
+          <div className="w-10 h-10 rounded-lg bg-transparent flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
+            <img 
+              src={brandSettings?.logo || defaultLogo} 
+              alt="AB Graphics Logo" 
+              className="max-h-full max-w-full object-contain mx-auto"
+              referrerPolicy="no-referrer"
+            />
+          </div>
           <span className="text-lg font-bold tracking-tight text-emerald-400">Graphics CRM</span>
         </div>
 
@@ -118,7 +128,14 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
       }`}>
         <div className="flex items-center justify-between h-16 px-6 border-b border-emerald-900/20">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center font-bold text-black text-sm shrink-0">AB</div>
+            <div className="w-10 h-10 rounded-lg bg-transparent flex items-center justify-center p-0.5 shrink-0 overflow-hidden">
+              <img 
+                src={brandSettings?.logo || defaultLogo} 
+                alt="AB Graphics Logo" 
+                className="max-h-full max-w-full object-contain mx-auto"
+                referrerPolicy="no-referrer"
+              />
+            </div>
             <span className="text-lg font-bold tracking-tight text-emerald-400">Graphics CRM</span>
           </div>
           <button 
@@ -194,6 +211,14 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
             >
               <Menu className="h-5.5 w-5.5" />
             </button>
+            <div className="w-8 h-8 rounded-lg bg-transparent flex items-center justify-center p-0.5 shrink-0 overflow-hidden md:hidden">
+              <img 
+                src={brandSettings?.logo || defaultLogo} 
+                alt="AB Graphics Logo" 
+                className="max-h-full max-w-full object-contain mx-auto"
+                referrerPolicy="no-referrer"
+              />
+            </div>
             <h1 className="text-lg sm:text-xl font-bold text-white capitalize tracking-tight">
               {navigation.find(item => item.value === activeTab)?.name}
             </h1>

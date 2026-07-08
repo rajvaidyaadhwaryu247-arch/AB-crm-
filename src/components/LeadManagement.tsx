@@ -25,7 +25,15 @@ import { motion } from 'motion/react';
 import { AVAILABLE_SERVICES } from './ClientManagement';
 
 export const LeadManagement: React.FC = () => {
-  const { leads, addLead, updateLead, deleteLead, convertLeadToClient } = useCRM();
+  const { 
+    leads, 
+    addLead, 
+    updateLead, 
+    deleteLead, 
+    convertLeadToClient, 
+    sendTelegramNotification, 
+    telegramSettings 
+  } = useCRM();
 
   // Filter/Search State
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,6 +80,13 @@ export const LeadManagement: React.FC = () => {
   const [cInitialPaymentMode, setCInitialPaymentMode] = useState<'Cash' | 'UPI' | 'Bank Transfer'>('UPI');
   const [cInitialPaymentType, setCInitialPaymentType] = useState<'Advance' | 'Full Payment'>('Advance');
   const [cInitialPaymentNotes, setCInitialPaymentNotes] = useState('');
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // Auto calculate client conversion expiry date
   useEffect(() => {
@@ -210,7 +225,44 @@ export const LeadManagement: React.FC = () => {
       if (editingLead) {
         await updateLead(editingLead.id, leadData);
       } else {
-        await addLead(leadData);
+        const savedLead = await addLead(leadData);
+        
+        // Construct and send Telegram notification
+        if (telegramSettings && telegramSettings.enabled) {
+          const createdDate = savedLead.createdAt 
+            ? new Date(savedLead.createdAt).toLocaleString('en-IN') 
+            : new Date().toLocaleString('en-IN');
+
+          const messageText = `🆕 NEW LEAD RECEIVED
+
+👤 Name: ${savedLead.name}
+🏢 Business: ${savedLead.business}
+📞 Phone: ${savedLead.mobile}
+📧 Email: N/A
+📍 Address: N/A
+📦 Interested Service: N/A
+💰 Budget: N/A
+📢 Source: ${savedLead.leadSource}
+📝 Notes: ${savedLead.notes || 'None'}
+📅 Created: ${createdDate}
+
+Also include two quick action links:
+
+📲 WhatsApp:
+https://wa.me/91${savedLead.mobile}
+
+📞 Call:
+tel:${savedLead.mobile}`;
+
+          try {
+            await sendTelegramNotification(messageText, 'lead_created', savedLead);
+            alert("Lead saved successfully! Telegram notification sent.");
+          } catch (tgError: any) {
+            alert(`Lead saved successfully! Telegram notification failed: ${tgError.message}`);
+          }
+        } else {
+          alert("Lead saved successfully!");
+        }
       }
       setIsFormOpen(false);
     } catch (err) {
@@ -278,12 +330,22 @@ export const LeadManagement: React.FC = () => {
 
   // Delete Lead
   const handleDeleteLead = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this lead record?")) {
+    try {
+      await deleteLead(id);
+      showToast("✅ Deleted successfully.", "success");
+    } catch (err: any) {
+      console.error(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      let readableMsg = errMsg;
       try {
-        await deleteLead(id);
-      } catch (err) {
-        console.error(err);
+        const parsed = JSON.parse(errMsg);
+        if (parsed && parsed.error) {
+          readableMsg = parsed.error;
+        }
+      } catch (pErr) {
+        // Not JSON
       }
+      showToast(`❌ Failed to delete: ${readableMsg}`, "error");
     }
   };
 
@@ -964,6 +1026,16 @@ export const LeadManagement: React.FC = () => {
 
             </form>
           </motion.div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-2xl transition-all duration-300 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-300' 
+            : 'bg-rose-950/90 border-rose-500/30 text-rose-300'
+        }`}>
+          <span className="text-sm font-medium">{toast.message}</span>
         </div>
       )}
 

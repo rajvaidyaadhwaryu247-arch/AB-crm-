@@ -7,11 +7,11 @@ import { getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
 
 // Initialize Firebase Admin
-admin.initializeApp({
+const app = admin.initializeApp({
   projectId: firebaseConfig.projectId,
 });
 
-const db = getFirestore(firebaseConfig.firestoreDatabaseId);
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 const CACHE_FILE = path.join(process.cwd(), 'telegram-cache.json');
 
@@ -48,19 +48,26 @@ function loadSettingsFromCache(): Record<string, CachedSettings> {
   return {};
 }
 
-// Securely fetch Telegram settings using Google Firestore REST API with the client's ID Token
-async function fetchTelegramSettingsFromRest(userId: string, idToken: string): Promise<CachedSettings> {
+// Securely fetch Telegram settings using Google Firestore REST API with the client's ID Token or public API Key
+async function fetchTelegramSettingsFromRest(userId: string, idToken?: string): Promise<CachedSettings> {
   const projectId = firebaseConfig.projectId;
   const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/telegramSettings/${userId}`;
+  let url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/telegramSettings/${userId}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+
+  if (idToken) {
+    headers['Authorization'] = `Bearer ${idToken}`;
+  } else {
+    url += `?key=${firebaseConfig.apiKey}`;
+  }
 
   console.log(`[REST Firestore] Fetching document: ${url}`);
   const res = await fetch(url, {
     method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${idToken}`,
-      'Content-Type': 'application/json'
-    }
+    headers: headers
   });
 
   if (!res.ok) {
@@ -95,9 +102,11 @@ async function sendTelegramWithRetry(botToken: string, chatId: string, text: str
         }),
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Telegram API returned ${response.status}: ${errText}`);
+      const resJson = await response.json().catch(() => null);
+
+      if (!response.ok || !resJson || resJson.ok !== true) {
+        const errMsg = resJson?.description || `Telegram API returned status ${response.status}`;
+        throw new Error(errMsg);
       }
 
       console.log(`[Telegram] Message sent successfully on attempt ${attempt}`);
@@ -211,8 +220,18 @@ async function startServer() {
 
       let settings: CachedSettings | null = null;
 
-      // 1. Attempt to fetch live Telegram settings from Firestore via Admin SDK directly
+      // 1. Attempt to fetch live Telegram settings from Firestore via REST API (which uses the user's ID token and is fully secure & authorized)
       if (userId) {
+        try {
+          settings = await fetchTelegramSettingsFromRest(userId, idToken);
+          console.log(`[Telegram API] Loaded live Telegram settings using REST API for user ${userId}`);
+        } catch (restErr: any) {
+          console.log(`[Telegram API] REST API Firestore fetch did not succeed: ${restErr.message}. Trying fallback...`);
+        }
+      }
+
+      // 2. If REST API not successful, try Admin SDK as fallback silently
+      if (!settings && userId) {
         try {
           const docSnap = await db.collection('telegramSettings').doc(userId).get();
           if (docSnap.exists) {
@@ -224,15 +243,15 @@ async function startServer() {
                 chatId: docData.chatId ?? '',
               };
               saveSettingsToCache(userId, settings);
-              console.log(`[Telegram API] Loaded live Telegram settings using Admin SDK for user ${userId}`);
+              console.log(`[Telegram API] Loaded live Telegram settings using Admin SDK fallback for user ${userId}`);
             }
           }
         } catch (adminErr: any) {
-          console.warn(`[Telegram API] Admin SDK Firestore fetch failed, trying local cache... Error: ${adminErr.message}`);
+          console.log(`[Telegram API] Admin SDK fallback bypassed or unavailable: ${adminErr.message}`);
         }
       }
 
-      // 2. Fallback to local cache if Admin SDK fails
+      // 3. Fallback to local cache if REST API also fails
       if (!settings) {
         const cache = loadSettingsFromCache();
         if (cache[userId]) {
@@ -255,28 +274,24 @@ async function startServer() {
       let formattedMessage = '';
 
       if (eventType === 'client_created' || eventType === 'client_updated') {
-        const services = Array.isArray(data.packageDetails?.services) 
-          ? data.packageDetails.services.join(', ') 
-          : 'None';
-        const amountPaid = data.revenue ?? 0;
+        const header = eventType === 'client_created' ? '🆕 New Client Added' : '🆕 Client Details';
+        const packageName = data.packageDetails?.customName || data.packageDetails?.type || 'Custom';
+        const packageAmount = data.packageDetails?.price || 0;
+        const paidAmount = data.revenue ?? 0;
         const pendingAmount = data.pendingAmount ?? 0;
 
-        const header = eventType === 'client_created' 
-          ? `🚀 *New Client Onboarded Successfully!*` 
-          : `🔄 *Client Profile Updated!*`;
-
         formattedMessage = `${header}\n\n` +
-          `👤 *Client Name:* ${data.name || 'N/A'}\n` +
-          `🏢 *Business Name:* ${data.businessName || 'N/A'}\n` +
-          `📞 *Mobile Number:* ${data.mobile || 'N/A'}\n` +
-          `📦 *Package Name:* ${data.packageDetails?.customName || data.packageDetails?.type || 'Custom'}\n` +
-          `💰 *Package Price:* ₹${data.packageDetails?.price || 0}\n` +
-          `💵 *Amount Paid:* ₹${amountPaid}\n` +
-          `📉 *Pending Amount:* ₹${pendingAmount}\n` +
-          `⏳ *Package Duration:* ${data.packageDuration || data.packageDetails?.duration || 'N/A'}\n` +
-          `📅 *Start Date:* ${data.startDate || 'N/A'}\n` +
-          `⌛ *Expiry Date:* ${data.expiryDate || 'N/A'}\n` +
-          `🛠️ *Included Services:* ${services}`;
+          `👤 Client Name: ${data.name || 'N/A'}\n` +
+          `🏢 Business: ${data.businessName || 'N/A'}\n` +
+          `📞 Phone: ${data.mobile || 'N/A'}\n` +
+          `💬 WhatsApp: ${data.whatsApp || 'N/A'}\n` +
+          `📦 Package: ${packageName}\n` +
+          `💰 Package Amount: ₹${packageAmount}\n` +
+          `💵 Paid Amount: ₹${paidAmount}\n` +
+          `📌 Pending Amount: ₹${pendingAmount}\n` +
+          `📅 Start Date: ${data.startDate || 'N/A'}\n` +
+          `⏳ End Date: ${data.expiryDate || 'N/A'}\n` +
+          `📝 Notes: ${data.notes || 'None'}`;
 
       } else if (eventType === 'payment_added') {
         formattedMessage = `💰 *Payment Received!*\n\n` +
@@ -305,16 +320,22 @@ async function startServer() {
           `📅 *Expired On:* ${data.expiryDate || 'N/A'}`;
 
       } else if (eventType === 'followup_created') {
-        formattedMessage = `📞 *New Follow-up Created*\n\n` +
-          `👤 *Client:* ${data.clientName || 'N/A'}\n` +
-          `🏢 *Business:* ${data.businessName || 'N/A'}\n` +
-          `📱 *Mobile:* ${data.mobile || 'N/A'}\n\n` +
-          `📅 *Date:* ${data.followUpDate || 'N/A'}\n` +
-          `⏰ *Time:* ${data.followUpTime || 'N/A'}\n\n` +
-          `📌 *Reason:* ${data.reason || 'N/A'}\n` +
-          `📝 *Notes:* ${data.notes || 'N/A'}\n\n` +
-          `Priority: *${data.priority || 'N/A'}*\n` +
-          `Status: *${data.status || 'N/A'}*`;
+        const clientName = data.clientName || 'N/A';
+        const businessName = data.businessName || 'N/A';
+        const taskTitle = data.title || data.reason || 'N/A';
+        const taskDescription = data.notes || 'None';
+        const scheduledDateTime = data.dueDate ? data.dueDate : `${data.followUpDate || 'N/A'} ${data.followUpTime || ''}`.trim();
+        const priority = data.priority || 'Medium';
+        const status = data.status || 'Pending';
+
+        formattedMessage = `📅 New Scheduled Task\n\n` +
+          `👤 Client: ${clientName}\n` +
+          `🏢 Business: ${businessName}\n` +
+          `📌 Task: ${taskTitle}\n` +
+          `📝 Details: ${taskDescription}\n` +
+          `⏰ Date & Time: ${scheduledDateTime}\n` +
+          `🔥 Priority: ${priority}\n` +
+          `📍 Status: ${status}`;
 
       } else if (eventType === 'followup_missed') {
         formattedMessage = `⚠️ *FOLLOW-UP MISSED*\n\n` +
@@ -374,80 +395,3 @@ async function startServer() {
 
 startServer();
 
-// Startup Automatic Testing (Requirement 10)
-setTimeout(async () => {
-  try {
-    console.log('[Startup Test] Running automated client creation Telegram notification test...');
-    const cache = loadSettingsFromCache();
-    const activeUserId = Object.keys(cache).find(uid => {
-      const s = cache[uid];
-      return s && s.enabled && s.botToken && s.chatId;
-    });
-    
-    if (activeUserId) {
-      const settings = cache[activeUserId];
-      console.log(`[Startup Test] Found active cached Telegram settings for user ${activeUserId}. Dispatching test notification...`);
-
-      const testClient = {
-        name: 'John Doe (Startup Test)',
-        businessName: 'AB Graphics Test Enterprise',
-        mobile: '+91 98765 43210',
-        whatsApp: '+91 98765 43210',
-        email: 'johndoe@test.com',
-        address: '123 Creative Studio Lane, Delhi',
-        startDate: new Date().toISOString().split('T')[0],
-        packageDuration: '3 Months',
-        expiryDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        status: 'Active',
-        paymentStatus: 'Paid',
-        revenue: 15000,
-        pendingAmount: 2500,
-        packageDetails: {
-          type: 'Pro',
-          customName: 'Mega Premium Brand Package',
-          price: 17500,
-          duration: '3 Months',
-          services: ['Brand Logo Design', 'Daily Social Media Graphics', '3D Motion Reel Video', 'SEO Audit']
-        }
-      };
-
-      const services = testClient.packageDetails.services.join(', ');
-
-      const formattedMessage = `🤖 *AB Graphics CRM - Automated Client Creation Test*\n\n` +
-        `This is a secure server-side automatic test following deployment verification.\n\n` +
-        `👤 *Client Name:* ${testClient.name}\n` +
-        `🏢 *Business Name:* ${testClient.businessName}\n` +
-        `📞 *Mobile Number:* ${testClient.mobile}\n` +
-        `📦 *Package Name:* ${testClient.packageDetails.customName}\n` +
-        `💰 *Package Price:* ₹${testClient.packageDetails.price}\n` +
-        `💵 *Amount Paid:* ₹${testClient.revenue}\n` +
-        `📉 *Pending Amount:* ₹${testClient.pendingAmount}\n` +
-        `⏳ *Package Duration:* ${testClient.packageDuration}\n` +
-        `📅 *Start Date:* ${testClient.startDate}\n` +
-        `⌛ *Expiry Date:* ${testClient.expiryDate}\n` +
-        `🛠️ *Included Services:* ${services}`;
-
-      const telegramUrl = `https://api.telegram.org/bot${settings.botToken}/sendMessage`;
-      const response = await fetch(telegramUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: settings.chatId,
-          text: formattedMessage,
-          parse_mode: 'Markdown',
-        }),
-      });
-
-      if (response.ok) {
-        console.log('[Startup Test] Automated client creation Telegram test notification dispatched successfully!');
-      } else {
-        const text = await response.text();
-        console.error(`[Startup Test] Automated test failed. Telegram API status: ${response.status}, response: ${text}`);
-      }
-    } else {
-      console.log('[Startup Test] No active / enabled Telegram configuration profiles found in local cache. Once any user interacts or triggers an event, their settings will be cached locally to enable background startup tests.');
-    }
-  } catch (err) {
-    console.error('[Startup Test] Error executing automated test notification:', err);
-  }
-}, 5000);

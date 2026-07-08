@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
-import { Client, Lead, Task, Activity, DashboardStats, TelegramSettings, FollowUp } from '../types';
+import { Client, Lead, Task, Activity, DashboardStats, TelegramSettings, BrandSettings, FollowUp } from '../types';
 import { isExpired, sanitizeForFirestore } from '../utils';
 
 interface CRMContextType {
@@ -25,6 +25,7 @@ interface CRMContextType {
   activities: Activity[];
   followUps: FollowUp[];
   telegramSettings: TelegramSettings | null;
+  brandSettings: BrandSettings | null;
   loading: {
     clients: boolean;
     leads: boolean;
@@ -36,7 +37,7 @@ interface CRMContextType {
   addClient: (client: Omit<Client, 'id' | 'createdBy' | 'createdAt' | 'status'>, imageFile?: File | null) => Promise<void>;
   updateClient: (id: string, client: Partial<Client>, imageFile?: File | null) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
-  addLead: (lead: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>) => Promise<void>;
+  addLead: (lead: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>) => Promise<Lead>;
   updateLead: (id: string, lead: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
   convertLeadToClient: (leadId: string, clientDetails: Omit<Client, 'id' | 'createdBy' | 'createdAt' | 'status'>, imageFile?: File | null) => Promise<void>;
@@ -57,6 +58,7 @@ interface CRMContextType {
   deleteFollowUp: (id: string) => Promise<void>;
   logActivity: (type: Activity['type'], description: string, clientId?: string) => Promise<void>;
   updateTelegramSettings: (settings: TelegramSettings) => Promise<void>;
+  updateBrandSettings: (settings: Partial<BrandSettings>) => Promise<void>;
   sendTelegramNotification: (messageText: string, eventType?: string, data?: any) => Promise<void>;
   stats: DashboardStats;
 }
@@ -122,6 +124,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings | null>(null);
+  const [brandSettings, setBrandSettings] = useState<BrandSettings | null>(null);
   
   const [loading, setLoading] = useState({
     clients: true,
@@ -240,6 +243,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLoading((prev) => ({ ...prev, telegram: false }));
     });
 
+    // Brand Settings listener (listen to 'default_user' directly)
+    const brandDocRef = doc(db, 'brandSettings', 'default_user');
+    const unsubBrand = onSnapshot(brandDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setBrandSettings({
+          ...docSnap.data()
+        } as BrandSettings);
+      } else {
+        setBrandSettings({});
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'brandSettings/default_user');
+    });
+
     // Activities listener (Limit to latest 50 for performance, fetch all)
     const qActivities = query(
       collection(db, 'activities')
@@ -285,6 +302,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubLeads();
       unsubTasks();
       unsubTelegram();
+      unsubBrand();
       unsubActivities();
       unsubFollowUps();
     };
@@ -319,11 +337,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               // Optimistically set tag to avoid double execution on slow DB write
               f.telegramReminderSent = true;
               await updateDoc(doc(db, 'followups', f.id), { telegramReminderSent: true });
-              await sendTelegramNotification(reminderText, "custom");
-              console.log(`[Client Scheduler] Sent reminder for follow-up: ${f.id}`);
+              console.log(`[Client Scheduler] Reminder for follow-up recorded: ${f.id}`);
             } catch (err) {
               f.telegramReminderSent = false;
-              console.error(`[Client Scheduler] Failed to send reminder for follow-up: ${f.id}`, err);
+              console.error(`[Client Scheduler] Failed to record reminder for follow-up: ${f.id}`, err);
             }
           }
 
@@ -343,7 +360,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 status: 'Missed', 
                 telegramMissedSent: true 
               });
-              await sendTelegramNotification(missedText, "custom");
               
               await addDoc(collection(db, 'activities'), {
                 type: 'followup_updated',
@@ -422,14 +438,16 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
+    let docRef;
     try {
-      const docRef = await addDoc(collection(db, 'clients'), sanitizeForFirestore(newClientDoc));
-      // Send Telegram Notification after successful Firestore write
-      sendTelegramNotification("", "client_created", { ...newClientDoc, id: docRef.id });
-      await logActivity('client_added', `Added new client: ${clientData.name} (${clientData.businessName})`, docRef.id);
+      docRef = await addDoc(collection(db, 'clients'), sanitizeForFirestore(newClientDoc));
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'clients');
+      return;
     }
+
+    await logActivity('client_added', `Added new client: ${clientData.name} (${clientData.businessName})`, docRef.id);
+    await sendTelegramNotification("", "client_created", { ...newClientDoc, id: docRef.id });
   };
 
   const updateClient = async (id: string, clientData: Partial<Client>, imageFile?: File | null) => {
@@ -552,7 +570,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Lead Operations
-  const addLead = async (leadData: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>) => {
+  const addLead = async (leadData: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>): Promise<Lead> => {
     if (!currentUser) throw new Error("User must be authenticated");
 
     const newLeadDoc = {
@@ -562,11 +580,17 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     try {
-      await addDoc(collection(db, 'leads'), sanitizeForFirestore(newLeadDoc));
+      const docRef = await addDoc(collection(db, 'leads'), sanitizeForFirestore(newLeadDoc));
+      const savedLead: Lead = {
+        ...newLeadDoc,
+        id: docRef.id
+      };
+      await logActivity('lead_added', `Created new lead: ${leadData.name} from ${leadData.leadSource}`);
+      return savedLead;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'leads');
+      throw error;
     }
-    await logActivity('lead_added', `Created new lead: ${leadData.name} from ${leadData.leadSource}`);
   };
 
   const updateLead = async (id: string, leadData: Partial<Lead>) => {
@@ -646,12 +670,24 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
+    let docRef;
     try {
-      await addDoc(collection(db, 'tasks'), sanitizeForFirestore(newTask));
+      docRef = await addDoc(collection(db, 'tasks'), sanitizeForFirestore(newTask));
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'tasks');
+      return;
     }
     await logActivity('task_added', `Created task: "${title}" (${type}) due by ${dueDate}`);
+
+    // Fetch matching client to get businessName for the Telegram notification
+    const matchedClient = clients.find(c => c.id === clientId);
+    const businessName = matchedClient ? matchedClient.businessName : 'N/A';
+
+    await sendTelegramNotification("", "followup_created", {
+      ...newTask,
+      id: docRef.id,
+      businessName
+    });
   };
 
   const toggleTask = async (id: string, completed: boolean) => {
@@ -712,16 +748,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error("Invalid follow-up date. Date cannot be in the past.");
     }
 
-    const isDuplicate = followUps.some(f => 
-      f.clientId === followUpData.clientId && 
-      f.followUpDate === followUpData.followUpDate && 
-      f.followUpTime === followUpData.followUpTime &&
-      f.status !== 'Completed' && f.status !== 'Missed'
-    );
-    if (isDuplicate) {
-      throw new Error("A pending follow-up already exists for this client at this date and time.");
-    }
-
     const newFollowUpDoc = {
       ...followUpData,
       createdBy: currentUser.uid,
@@ -730,14 +756,16 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       telegramMissedSent: false
     };
 
+    let docRef;
     try {
-      const docRef = await addDoc(collection(db, 'followups'), sanitizeForFirestore(newFollowUpDoc));
-      // Trigger instant Telegram Notification
-      sendTelegramNotification("", "followup_created", { ...newFollowUpDoc, id: docRef.id });
-      await logActivity('followup_added', `Scheduled follow-up for client ${followUpData.clientName} on ${followUpData.followUpDate} at ${followUpData.followUpTime}`, followUpData.clientId);
+      docRef = await addDoc(collection(db, 'followups'), sanitizeForFirestore(newFollowUpDoc));
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'followups');
+      return;
     }
+
+    await logActivity('followup_added', `Scheduled follow-up for client ${followUpData.clientName} on ${followUpData.followUpDate} at ${followUpData.followUpTime}`, followUpData.clientId);
+    await sendTelegramNotification("", "followup_created", { ...newFollowUpDoc, id: docRef.id });
   };
 
   const updateFollowUp = async (id: string, followUpData: Partial<FollowUp>) => {
@@ -804,6 +832,22 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logActivity('client_updated', `Updated Telegram Bot settings`);
   };
 
+  // Brand settings functions
+  const updateBrandSettings = async (settings: Partial<BrandSettings>) => {
+    const docRef = doc(db, 'brandSettings', 'default_user');
+    try {
+      const updated = {
+        ...brandSettings,
+        ...settings
+      };
+      await setDoc(docRef, sanitizeForFirestore(updated));
+      setBrandSettings(updated);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'brandSettings/default_user');
+    }
+    await logActivity('client_updated', `Updated global agency brand assets`);
+  };
+
   const sendTelegramNotification = async (messageText: string, eventType = 'custom', data?: any) => {
     if (!telegramSettings || !telegramSettings.enabled) {
       console.log("Telegram notifications disabled or unconfigured in client.");
@@ -831,11 +875,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const parsed = JSON.parse(errText);
           if (parsed && parsed.error) errMsg = parsed.error;
         } catch (_) {}
-        throw new Error(`Server returned status ${response.status}: ${errMsg}`);
+        throw new Error(errMsg);
       }
       console.log(`Telegram notification for event "${eventType}" sent successfully via secure backend!`);
     } catch (error) {
       console.error("Failed to send Telegram notification via backend:", error);
+      throw error;
     }
   };
 
@@ -874,6 +919,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activities,
       followUps,
       telegramSettings,
+      brandSettings,
       loading,
       addClient,
       updateClient,
@@ -891,6 +937,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteFollowUp,
       logActivity,
       updateTelegramSettings,
+      updateBrandSettings,
       sendTelegramNotification,
       stats
     }}>
