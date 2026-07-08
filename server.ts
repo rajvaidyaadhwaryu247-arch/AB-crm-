@@ -211,16 +211,28 @@ async function startServer() {
 
       let settings: CachedSettings | null = null;
 
-      // 1. Attempt to fetch live Telegram settings from Firestore via REST using ID Token
-      if (idToken) {
+      // 1. Attempt to fetch live Telegram settings from Firestore via Admin SDK directly
+      if (userId) {
         try {
-          settings = await fetchTelegramSettingsFromRest(userId, idToken);
-        } catch (restErr: any) {
-          console.warn(`[Telegram API] REST Firestore fetch failed, trying local cache... Error: ${restErr.message}`);
+          const docSnap = await db.collection('telegramSettings').doc(userId).get();
+          if (docSnap.exists) {
+            const docData = docSnap.data();
+            if (docData) {
+              settings = {
+                enabled: docData.enabled ?? false,
+                botToken: docData.botToken ?? '',
+                chatId: docData.chatId ?? '',
+              };
+              saveSettingsToCache(userId, settings);
+              console.log(`[Telegram API] Loaded live Telegram settings using Admin SDK for user ${userId}`);
+            }
+          }
+        } catch (adminErr: any) {
+          console.warn(`[Telegram API] Admin SDK Firestore fetch failed, trying local cache... Error: ${adminErr.message}`);
         }
       }
 
-      // 2. Fallback to local cache if REST API fails or idToken is missing
+      // 2. Fallback to local cache if Admin SDK fails
       if (!settings) {
         const cache = loadSettingsFromCache();
         if (cache[userId]) {
@@ -232,7 +244,7 @@ async function startServer() {
       // 3. Error if no configuration available
       if (!settings) {
         return res.status(400).json({ 
-          error: 'Telegram settings not found or unauthorized. Please verify your settings in the app or sign in again.' 
+          error: 'Telegram settings not found. Please configure your Telegram Bot settings in the Telegram Settings tab.' 
         });
       }
 

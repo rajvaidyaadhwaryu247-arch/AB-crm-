@@ -12,14 +12,16 @@ import {
   BarChart3,
   Send
 } from 'lucide-react';
-import { auth } from '../firebase';
-import { signOut, User } from 'firebase/auth';
+// Removed firebase auth imports for single-user authentication-free experience
 
 interface CRMLayoutProps {
   children: React.ReactNode;
   activeTab: 'dashboard' | 'clients' | 'leads' | 'tasks' | 'reports' | 'telegram';
   setActiveTab: (tab: 'dashboard' | 'clients' | 'leads' | 'tasks' | 'reports' | 'telegram') => void;
-  user: User;
+  user: {
+    displayName?: string;
+    email?: string;
+  };
 }
 
 export const CRMLayout: React.FC<CRMLayoutProps> = ({ 
@@ -39,10 +41,8 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
     { name: 'Telegram Settings', value: 'telegram' as const, icon: Send },
   ];
 
-  const handleLogout = async () => {
-    if (window.confirm('Are you sure you want to log out?')) {
-      await signOut(auth);
-    }
+  const handleBackToDashboard = () => {
+    setActiveTab('dashboard');
   };
 
   return (
@@ -92,13 +92,15 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
                 {user.email}
               </p>
             </div>
-            <button 
-              onClick={handleLogout}
-              title="Logout"
-              className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {activeTab !== 'dashboard' && (
+              <button 
+                onClick={handleBackToDashboard}
+                title="Back to Dashboard"
+                className="p-1.5 rounded-lg text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -164,12 +166,18 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
                 {user.email}
               </p>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {activeTab !== 'dashboard' && (
+              <button 
+                onClick={() => {
+                  handleBackToDashboard();
+                  setMobileMenuOpen(false);
+                }}
+                title="Back to Dashboard"
+                className="p-1.5 rounded-lg text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </aside>

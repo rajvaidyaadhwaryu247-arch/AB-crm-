@@ -14,7 +14,7 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../firebase';
+import { db, storage } from '../firebase';
 import { Client, Lead, Task, Activity, DashboardStats, TelegramSettings, FollowUp } from '../types';
 import { isExpired, sanitizeForFirestore } from '../utils';
 
@@ -93,15 +93,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
+      userId: 'default_user',
+      email: 'admin@abgraphics.com',
+      emailVerified: true,
+      isAnonymous: false,
+      tenantId: null,
+      providerInfo: []
     },
     operationType,
     path
@@ -135,42 +132,17 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     followUps: true
   });
 
-  const [currentUser, setCurrentUser] = useState(auth.currentUser);
+  const currentUser = {
+    uid: 'default_user',
+    email: 'admin@abgraphics.com',
+    displayName: 'AB Graphics Admin'
+  };
 
-  // Monitor auth state changes
+  // Set up Firestore real-time listeners for single-user environment (all docs loaded without auth gates)
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-      if (!user) {
-        setClients([]);
-        setLeeds([]);
-        setTasks([]);
-        setActivities([]);
-        setFollowUps([]);
-        setTelegramSettings(null);
-        setLoading({
-          clients: false,
-          leads: false,
-          tasks: false,
-          activities: false,
-          telegram: false,
-          followUps: false
-        });
-      }
-    });
-    return unsubscribe;
-  }, []);
-
-  // Set up Firestore real-time listeners for the logged-in user
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const uid = currentUser.uid;
-
-    // Clients listener
+    // Clients listener (fetch all)
     const qClients = query(
-      collection(db, 'clients'),
-      where('createdBy', '==', uid)
+      collection(db, 'clients')
     );
     const unsubClients = onSnapshot(qClients, (snapshot) => {
       const list: Client[] = [];
@@ -204,10 +176,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLoading((prev) => ({ ...prev, clients: false }));
     });
 
-    // Leads listener
+    // Leads listener (fetch all)
     const qLeads = query(
-      collection(db, 'leads'),
-      where('createdBy', '==', uid)
+      collection(db, 'leads')
     );
     const unsubLeads = onSnapshot(qLeads, (snapshot) => {
       const list: Lead[] = [];
@@ -225,10 +196,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLoading((prev) => ({ ...prev, leads: false }));
     });
 
-    // Tasks listener
+    // Tasks listener (fetch all)
     const qTasks = query(
-      collection(db, 'tasks'),
-      where('createdBy', '==', uid)
+      collection(db, 'tasks')
     );
     const unsubTasks = onSnapshot(qTasks, (snapshot) => {
       const list: Task[] = [];
@@ -253,24 +223,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLoading((prev) => ({ ...prev, tasks: false }));
     });
 
-    // Telegram Settings listener
-    const docRef = doc(db, 'telegramSettings', uid);
+    // Telegram Settings listener (listen to 'default_user' directly)
+    const docRef = doc(db, 'telegramSettings', 'default_user');
     const unsubTelegram = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        setTelegramSettings(docSnap.data() as TelegramSettings);
+        setTelegramSettings({
+          id: 'default_user',
+          ...docSnap.data()
+        } as any);
       } else {
         setTelegramSettings({ botToken: '', chatId: '', enabled: false });
       }
       setLoading((prev) => ({ ...prev, telegram: false }));
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `telegramSettings/${uid}`);
+      handleFirestoreError(error, OperationType.GET, 'telegramSettings/default_user');
       setLoading((prev) => ({ ...prev, telegram: false }));
     });
 
-    // Activities listener (Limit to latest 50 for performance)
+    // Activities listener (Limit to latest 50 for performance, fetch all)
     const qActivities = query(
-      collection(db, 'activities'),
-      where('createdBy', '==', uid)
+      collection(db, 'activities')
     );
     const unsubActivities = onSnapshot(qActivities, (snapshot) => {
       const list: Activity[] = [];
@@ -288,10 +260,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLoading((prev) => ({ ...prev, activities: false }));
     });
 
-    // Follow-ups listener
+    // Follow-ups listener (fetch all)
     const qFollowUps = query(
-      collection(db, 'followups'),
-      where('createdBy', '==', uid)
+      collection(db, 'followups')
     );
     const unsubFollowUps = onSnapshot(qFollowUps, (snapshot) => {
       const list: FollowUp[] = [];
@@ -317,7 +288,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubActivities();
       unsubFollowUps();
     };
-  }, [currentUser]);
+  }, []);
 
   // Client-side background checker for due/missed strategic follow-ups
   useEffect(() => {
@@ -822,33 +793,32 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Telegram settings functions
   const updateTelegramSettings = async (settings: TelegramSettings) => {
-    if (!currentUser) throw new Error("User must be authenticated");
-    const docRef = doc(db, 'telegramSettings', currentUser.uid);
+    const docId = (telegramSettings as any)?.id || 'default_user';
+    const docRef = doc(db, 'telegramSettings', docId);
     try {
       await setDoc(docRef, sanitizeForFirestore(settings));
+      setTelegramSettings({ ...settings, id: docId } as any);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `telegramSettings/${currentUser.uid}`);
+      handleFirestoreError(error, OperationType.WRITE, `telegramSettings/${docId}`);
     }
     await logActivity('client_updated', `Updated Telegram Bot settings`);
   };
 
   const sendTelegramNotification = async (messageText: string, eventType = 'custom', data?: any) => {
-    if (!currentUser) return;
     if (!telegramSettings || !telegramSettings.enabled) {
       console.log("Telegram notifications disabled or unconfigured in client.");
       return;
     }
 
     try {
-      const idToken = await currentUser.getIdToken();
+      const docId = (telegramSettings as any)?.id || 'default_user';
       const response = await fetch('/api/telegram/notify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          userId: currentUser.uid,
-          idToken,
+          userId: docId,
           eventType,
           messageText,
           data

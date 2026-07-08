@@ -1,39 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Rules for CRM collections - allow any authenticated user to read/write/delete
-    // Data isolation is enforced client-side via createdBy filters in queries
-    
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // CRM collections allowed for unauthenticated single-user personal use
     match /clients/{clientId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /leads/{leadId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /tasks/{taskId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /activities/{activityId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /followups/{followupId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /reminders/{reminderId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     match /telegramSettings/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if true;
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
   }
 }
