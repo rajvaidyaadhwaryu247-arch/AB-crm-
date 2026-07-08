@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "Represents a digital marketing agency client",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Client name" },
+        "businessName": { "type": "string", "description": "Business Name" },
+        "mobile": { "type": "string", "description": "Mobile number" },
+        "whatsApp": { "type": "string", "description": "WhatsApp number" },
+        "email": { "type": "string", "description": "Email address" },
+        "address": { "type": "string", "description": "Physical address" },
+        "gstNumber": { "type": "string", "description": "GST number (optional)" },
+        "startDate": { "type": "string", "format": "date", "description": "Start date of the service" },
+        "packageDuration": { "type": "string", "description": "Duration of the package in months or years" },
+        "expiryDate": { "type": "string", "format": "date", "description": "Auto-calculated expiry date" },
+        "profilePhoto": { "type": "string", "description": "Profile photo URL or Base64" },
+        "notes": { "type": "string", "description": "Notes and remarks" },
+        "status": { "type": "string", "enum": ["Active", "Expired"], "description": "Client status" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Pending"], "description": "Payment status" },
+        "revenue": { "type": "number", "description": "Paid revenue from client" },
+        "pendingAmount": { "type": "number", "description": "Pending amount to be paid" },
+        "createdBy": { "type": "string", "description": "ID of the user who added the client" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "businessName", "mobile", "email", "startDate", "packageDuration", "expiryDate", "createdBy"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Represents a potential marketing client",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Lead name" },
+        "business": { "type": "string", "description": "Lead business name" },
+        "mobile": { "type": "string", "description": "Lead contact number" },
+        "leadSource": { "type": "string", "description": "Source of the lead (e.g. Facebook, Reference, Website)" },
+        "followUpDate": { "type": "string", "format": "date", "description": "Next follow-up date" },
+        "status": { "type": "string", "enum": ["New", "Contacted", "In Progress", "Converted", "Lost"], "description": "Status of the lead" },
+        "notes": { "type": "string", "description": "Interaction logs" },
+        "createdBy": { "type": "string", "description": "ID of the user who added the lead" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "business", "mobile", "leadSource", "followUpDate", "status", "createdBy"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Daily CRM reminder or task",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Task description" },
+        "dueDate": { "type": "string", "format": "date", "description": "Task due date" },
+        "completed": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["Pending", "In Progress", "Completed"], "description": "Current stage of the task" },
+        "type": { "type": "string", "enum": ["Shoot", "Editing", "Poster", "Ads", "Website", "Printing"], "description": "Classification of the task" },
+        "clientId": { "type": "string", "description": "Associated client ID (optional)" },
+        "clientName": { "type": "string", "description": "Associated client name (optional)" },
+        "notes": { "type": "string", "description": "Task notes/instructions" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "dueDate", "completed", "status", "type", "createdBy"]
+    },
+    "TelegramSettings": {
+      "title": "TelegramSettings",
+      "description": "User Telegram Bot Notification Credentials",
+      "type": "object",
+      "properties": {
+        "botToken": { "type": "string", "description": "Telegram Bot Token" },
+        "chatId": { "type": "string", "description": "Telegram Channel/Chat ID" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["botToken", "chatId", "enabled"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "System activity log for CRM history",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "description": "Type of activity" },
+        "description": { "type": "string", "description": "Human readable description" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["type", "description", "timestamp", "createdBy"]
+    },
+    "FollowUp": {
+      "title": "FollowUp",
+      "description": "Strategic client follow-up reminder",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "businessName": { "type": "string" },
+        "mobile": { "type": "string" },
+        "followUpDate": { "type": "string", "format": "date" },
+        "followUpTime": { "type": "string" },
+        "followUpType": { "type": "string", "enum": ["Call", "Meeting", "Proposal", "Other"] },
+        "reason": { "type": "string" },
+        "notes": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "status": { "type": "string", "enum": ["Pending", "Completed", "Missed", "Rescheduled"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "telegramReminderSent": { "type": "boolean" },
+        "telegramMissedSent": { "type": "boolean" }
+      },
+      "required": ["clientId", "clientName", "businessName", "mobile", "followUpDate", "followUpType", "reason", "priority", "status", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Collection of agency clients"
+    },
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Collection of potential client leads"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "User CRM tasks and follow-ups"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "CRM activity audit logs"
+    },
+    "/telegramSettings/{userId}": {
+      "schema": "TelegramSettings",
+      "description": "User specific Telegram Bot Integration settings"
+    },
+    "/followups/{followupId}": {
+      "schema": "FollowUp",
+      "description": "User client strategic follow-ups"
+    }
+  }
+}

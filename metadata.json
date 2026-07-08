@@ -1,0 +1,6 @@
+{
+  "name": "AB Graphics CRM",
+  "description": "Production-ready responsive CRM for AB Graphics digital marketing agency, with Client and Lead Management, Firebase Auth, and interactive dashboard analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
