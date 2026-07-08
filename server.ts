@@ -212,51 +212,58 @@ async function startServer() {
   app.post('/api/telegram/notify', async (req, res) => {
     try {
       const { userId, idToken, eventType, messageText, data } = req.body;
-      if (!userId) {
-        return res.status(400).json({ error: 'userId is required' });
-      }
+      const bodyBotToken = req.body.botToken;
+      const bodyChatId = req.body.chatId;
 
-      console.log(`[Telegram API] Received notification request for user ${userId}, eventType: ${eventType}`);
+      console.log(`[Telegram API] Received notification request. eventType: ${eventType}`);
 
       let settings: CachedSettings | null = null;
 
-      // 1. Attempt to fetch live Telegram settings from Firestore via REST API (which uses the user's ID token and is fully secure & authorized)
-      if (userId) {
+      // 0. Use botToken and chatId if provided in the body of the request (direct execution proxy)
+      if (bodyBotToken && bodyChatId) {
+        settings = {
+          enabled: true,
+          botToken: bodyBotToken,
+          chatId: bodyChatId
+        };
+        console.log(`[Telegram API] Using botToken and chatId supplied in the request body`);
+      } else if (userId) {
+        // 1. Attempt to fetch live Telegram settings from Firestore via REST API (which uses the user's ID token and is fully secure & authorized)
         try {
           settings = await fetchTelegramSettingsFromRest(userId, idToken);
           console.log(`[Telegram API] Loaded live Telegram settings using REST API for user ${userId}`);
         } catch (restErr: any) {
           console.log(`[Telegram API] REST API Firestore fetch did not succeed: ${restErr.message}. Trying fallback...`);
         }
-      }
 
-      // 2. If REST API not successful, try Admin SDK as fallback silently
-      if (!settings && userId) {
-        try {
-          const docSnap = await db.collection('telegramSettings').doc(userId).get();
-          if (docSnap.exists) {
-            const docData = docSnap.data();
-            if (docData) {
-              settings = {
-                enabled: docData.enabled ?? false,
-                botToken: docData.botToken ?? '',
-                chatId: docData.chatId ?? '',
-              };
-              saveSettingsToCache(userId, settings);
-              console.log(`[Telegram API] Loaded live Telegram settings using Admin SDK fallback for user ${userId}`);
+        // 2. If REST API not successful, try Admin SDK as fallback silently
+        if (!settings) {
+          try {
+            const docSnap = await db.collection('telegramSettings').doc(userId).get();
+            if (docSnap.exists) {
+              const docData = docSnap.data();
+              if (docData) {
+                settings = {
+                  enabled: docData.enabled ?? false,
+                  botToken: docData.botToken ?? '',
+                  chatId: docData.chatId ?? '',
+                };
+                saveSettingsToCache(userId, settings);
+                console.log(`[Telegram API] Loaded live Telegram settings using Admin SDK fallback for user ${userId}`);
+              }
             }
+          } catch (adminErr: any) {
+            console.log(`[Telegram API] Admin SDK fallback bypassed or unavailable: ${adminErr.message}`);
           }
-        } catch (adminErr: any) {
-          console.log(`[Telegram API] Admin SDK fallback bypassed or unavailable: ${adminErr.message}`);
         }
-      }
 
-      // 3. Fallback to local cache if REST API also fails
-      if (!settings) {
-        const cache = loadSettingsFromCache();
-        if (cache[userId]) {
-          settings = cache[userId];
-          console.log(`[Telegram API] Loaded Telegram settings from local cache for user ${userId}`);
+        // 3. Fallback to local cache if REST API also fails
+        if (!settings) {
+          const cache = loadSettingsFromCache();
+          if (cache[userId]) {
+            settings = cache[userId];
+            console.log(`[Telegram API] Loaded Telegram settings from local cache for user ${userId}`);
+          }
         }
       }
 

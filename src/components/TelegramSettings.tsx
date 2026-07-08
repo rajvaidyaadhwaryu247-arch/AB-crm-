@@ -26,7 +26,8 @@ export const TelegramSettings: React.FC = () => {
     updateTelegramSettings, 
     brandSettings, 
     updateBrandSettings, 
-    loading 
+    loading,
+    sendTelegramNotification
   } = useCRM();
 
   // Active sub-tab state: 'brand' or 'telegram'
@@ -233,26 +234,20 @@ export const TelegramSettings: React.FC = () => {
     try {
       const testMsg = `🔔 *AB Graphics CRM Bot Test*\n\nYour Telegram Bot settings have been saved successfully!\n\n🤖 *Bot Status:* Online & Connected\n📅 *Server Time:* ${new Date().toLocaleString()}\n🚀 *System:* Ready to push active lead & renewal notifications.`;
       
-      const response = await fetch(`https://api.telegram.org/bot${botToken.trim()}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId.trim(),
-          text: testMsg,
-          parse_mode: 'Markdown'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Telegram error status ${response.status}`);
-      }
+      await sendTelegramNotification(
+        testMsg,
+        'custom',
+        null,
+        botToken.trim(),
+        chatId.trim()
+      );
 
       setTestStatus('success');
       setTimeout(() => setTestStatus('idle'), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setTestStatus('error');
-      alert("Test message failed. Please verify that your Token is correct and that your bot has been started with /start in the selected Chat ID.");
+      alert(`Test message failed: ${err.message || err}. Please verify that your Token is correct and that your bot has been started with /start in the selected Chat ID.`);
     } finally {
       setIsTesting(false);
     }

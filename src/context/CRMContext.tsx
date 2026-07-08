@@ -59,7 +59,7 @@ interface CRMContextType {
   logActivity: (type: Activity['type'], description: string, clientId?: string) => Promise<void>;
   updateTelegramSettings: (settings: TelegramSettings) => Promise<void>;
   updateBrandSettings: (settings: Partial<BrandSettings>) => Promise<void>;
-  sendTelegramNotification: (messageText: string, eventType?: string, data?: any) => Promise<void>;
+  sendTelegramNotification: (messageText: string, eventType?: string, data?: any, customBotToken?: string, customChatId?: string) => Promise<void>;
   stats: DashboardStats;
 }
 
@@ -848,8 +848,18 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logActivity('client_updated', `Updated global agency brand assets`);
   };
 
-  const sendTelegramNotification = async (messageText: string, eventType = 'custom', data?: any) => {
-    if (!telegramSettings || !telegramSettings.enabled) {
+  const sendTelegramNotification = async (
+    messageText: string,
+    eventType = 'custom',
+    data?: any,
+    customBotToken?: string,
+    customChatId?: string
+  ) => {
+    const finalBotToken = customBotToken || telegramSettings?.botToken;
+    const finalChatId = customChatId || telegramSettings?.chatId;
+    const isEnabled = customBotToken ? true : (telegramSettings?.enabled);
+
+    if (!finalBotToken || !finalChatId || !isEnabled) {
       console.log("Telegram notifications disabled or unconfigured in client.");
       return;
     }
@@ -865,7 +875,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           userId: docId,
           eventType,
           messageText,
-          data
+          data,
+          botToken: finalBotToken,
+          chatId: finalChatId
         })
       });
       if (!response.ok) {
