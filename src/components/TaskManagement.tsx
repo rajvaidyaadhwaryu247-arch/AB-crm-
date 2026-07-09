@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { Task } from '../types';
 import { formatDate } from '../utils';
@@ -45,7 +45,9 @@ export const TaskManagement: React.FC = () => {
 
       await sendTelegramNotification("", "followup_created", {
         ...task,
-        businessName
+        businessName,
+        address: matchedClient?.address,
+        notes: matchedClient?.notes
       });
       alert(`Success: Telegram notification sent for task!`);
     } catch (err: any) {
@@ -167,22 +169,28 @@ export const TaskManagement: React.FC = () => {
   };
 
   // Filter Logic
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      (task.notes && task.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    
-    const matchesType = typeFilter === 'All' || task.type === typeFilter;
-    const matchesStatus = statusFilter === 'All' || task.status === statusFilter;
-    const matchesClient = clientFilter === 'All' || task.clientId === clientFilter;
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(task => {
+      const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (task.notes && task.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+      
+      const matchesType = typeFilter === 'All' || task.type === typeFilter;
+      const matchesStatus = statusFilter === 'All' || task.status === statusFilter;
+      const matchesClient = clientFilter === 'All' || task.clientId === clientFilter;
 
-    return matchesSearch && matchesType && matchesStatus && matchesClient;
-  });
+      return matchesSearch && matchesType && matchesStatus && matchesClient;
+    });
+  }, [tasks, searchTerm, typeFilter, statusFilter, clientFilter]);
 
-  // Calculate high-level metrics
-  const totalTasksCount = tasks.length;
-  const pendingCount = tasks.filter(t => t.status === 'Pending').length;
-  const inProgressCount = tasks.filter(t => t.status === 'In Progress').length;
-  const completedCount = tasks.filter(t => t.status === 'Completed').length;
+  // Calculate high-level metrics (memoized)
+  const { totalTasksCount, pendingCount, inProgressCount, completedCount } = useMemo(() => {
+    return {
+      totalTasksCount: tasks.length,
+      pendingCount: tasks.filter(t => t.status === 'Pending').length,
+      inProgressCount: tasks.filter(t => t.status === 'In Progress').length,
+      completedCount: tasks.filter(t => t.status === 'Completed').length
+    };
+  }, [tasks]);
 
   const getStatusColor = (s: Task['status']) => {
     switch (s) {

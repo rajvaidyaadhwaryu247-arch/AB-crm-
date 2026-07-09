@@ -10,6 +10,11 @@
 }
 
 /* Custom global overrides for CRM dark UI */
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
   background-color: #090909; /* Deep bento black */
   color: #f3f4f6; /* Gray 100 */
@@ -34,3 +39,15 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #10b981; /* Brand green */
 }
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-none {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+}
+

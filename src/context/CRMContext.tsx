@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   collection, 
   onSnapshot, 
@@ -15,8 +15,8 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
-import { Client, Lead, Task, Activity, DashboardStats, TelegramSettings, BrandSettings, FollowUp } from '../types';
-import { isExpired, sanitizeForFirestore } from '../utils';
+import { Client, Lead, Task, Activity, DashboardStats, TelegramSettings, BrandSettings, FollowUp, CRMUser, teamMembers } from '../types';
+import { isExpired, sanitizeForFirestore, calculateLeadScoreAndHealth } from '../utils';
 
 interface CRMContextType {
   clients: Client[];
@@ -34,11 +34,14 @@ interface CRMContextType {
     telegram: boolean;
     followUps: boolean;
   };
+  currentUser: CRMUser;
+  setCurrentUser: (user: CRMUser) => void;
+  teamMembers: CRMUser[];
   addClient: (client: Omit<Client, 'id' | 'createdBy' | 'createdAt' | 'status'>, imageFile?: File | null) => Promise<void>;
   updateClient: (id: string, client: Partial<Client>, imageFile?: File | null) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
   addLead: (lead: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>) => Promise<Lead>;
-  updateLead: (id: string, lead: Partial<Lead>) => Promise<void>;
+  updateLead: (id: string, lead: Partial<Lead>, customAction?: string, customNotes?: string) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
   convertLeadToClient: (leadId: string, clientDetails: Omit<Client, 'id' | 'createdBy' | 'createdAt' | 'status'>, imageFile?: File | null) => Promise<void>;
   addTask: (
@@ -48,7 +51,12 @@ interface CRMContextType {
     status?: Task['status'],
     clientId?: string,
     clientName?: string,
-    notes?: string
+    notes?: string,
+    leadId?: string,
+    leadName?: string,
+    assignedTo?: Task['assignedTo'],
+    priority?: Task['priority'],
+    plannerActivityId?: string
   ) => Promise<void>;
   toggleTask: (id: string, completed: boolean) => Promise<void>;
   updateTask: (id: string, taskData: Partial<Task>) => Promise<void>;
@@ -135,11 +143,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     followUps: true
   });
 
-  const currentUser = {
-    uid: 'default_user',
-    email: 'admin@abgraphics.com',
-    displayName: 'AB Graphics Admin'
-  };
+  const [currentUser, setCurrentUser] = useState<CRMUser>(teamMembers[0]);
 
   // Set up Firestore real-time listeners for single-user environment (all docs loaded without auth gates)
   useEffect(() => {
@@ -308,13 +312,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Keep updated refs of lists and settings for the background scheduler to avoid interval tear-downs
+  const followUpsRef = useRef(followUps);
+  const currentUserRef = useRef(currentUser);
+
+  useEffect(() => {
+    followUpsRef.current = followUps;
+    currentUserRef.current = currentUser;
+  }, [followUps]);
+
   // Client-side background checker for due/missed strategic follow-ups
   useEffect(() => {
-    if (!currentUser || loading.followUps) return;
+    if (loading.followUps) return;
 
     const checkInterval = setInterval(async () => {
       const now = new Date();
-      for (const f of followUps) {
+      const currentFollowUps = followUpsRef.current;
+      const user = currentUserRef.current;
+      if (!user) return;
+
+      for (const f of currentFollowUps) {
         if (f.status !== 'Pending' && f.status !== 'Rescheduled') continue;
 
         // Scheduled datetime with local timezone offset -07:00 as requested
@@ -365,7 +382,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 type: 'followup_updated',
                 description: `Auto-marked follow-up for ${f.clientName || 'Client'} as Missed`,
                 timestamp: new Date().toISOString(),
-                createdBy: currentUser.uid,
+                createdBy: user.uid,
                 clientId: f.clientId || null
               });
               console.log(`[Client Scheduler] Marked follow-up as missed: ${f.id}`);
@@ -380,7 +397,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 15000);
 
     return () => clearInterval(checkInterval);
-  }, [currentUser, followUps, loading.followUps, telegramSettings]);
+  }, [loading.followUps]);
 
   // Image Upload Helper
   const handlePhotoUpload = async (file: File): Promise<string> => {
@@ -497,7 +514,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           clientName: existingClient?.name,
           businessName: existingClient?.businessName,
           payment: addedPayment,
-          pendingAmount: clientData.pendingAmount ?? 0
+          pendingAmount: clientData.pendingAmount ?? 0,
+          address: existingClient?.address,
+          notes: existingClient?.notes
         });
       }
 
@@ -507,7 +526,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           businessName: clientData.businessName || existingClient?.businessName,
           packageDetails: clientData.packageDetails || existingClient?.packageDetails,
           startDate: clientData.startDate || existingClient?.startDate,
-          expiryDate: clientData.expiryDate
+          expiryDate: clientData.expiryDate,
+          address: clientData.address || existingClient?.address,
+          notes: clientData.notes || existingClient?.notes
         });
       }
     } catch (error) {
@@ -573,10 +594,36 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addLead = async (leadData: Omit<Lead, 'id' | 'createdBy' | 'createdAt'>): Promise<Lead> => {
     if (!currentUser) throw new Error("User must be authenticated");
 
-    const newLeadDoc = {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const userStr = currentUser.displayName || 'AB Graphics Admin';
+
+    // Initialize with a clean "Lead Created" timeline entry
+    const initialTimelineItem = {
+      date: dateStr,
+      time: timeStr,
+      action: 'Lead Created',
+      previousValue: '',
+      newValue: leadData.status || 'New',
+      user: userStr,
+      notes: leadData.notes || 'Lead logged in system'
+    };
+
+    const tempLead = {
       ...leadData,
+      timeline: [initialTimelineItem],
+      createdAt: now.toISOString()
+    };
+
+    const { score, health } = calculateLeadScoreAndHealth(tempLead, followUps);
+
+    const newLeadDoc = {
+      ...tempLead,
+      leadScore: score,
+      health: health,
       createdBy: currentUser.uid,
-      createdAt: new Date().toISOString()
+      createdAt: tempLead.createdAt
     };
 
     try {
@@ -593,19 +640,98 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updateLead = async (id: string, leadData: Partial<Lead>) => {
+  const updateLead = async (id: string, leadData: Partial<Lead>, customAction?: string, customNotes?: string) => {
     if (!currentUser) throw new Error("User must be authenticated");
 
-    let updatedData = { ...leadData };
-    delete updatedData.id;
+    const existingLead = leads.find(l => l.id === id);
+    if (!existingLead) throw new Error("Lead not found");
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const userStr = currentUser.displayName || 'AB Graphics Admin';
+
+    const newTimelineItems: any[] = [];
+
+    // Check what changed to automatically maintain timeline history
+    if (leadData.status && leadData.status !== existingLead.status) {
+      newTimelineItems.push({
+        date: dateStr,
+        time: timeStr,
+        action: 'Status Changed',
+        previousValue: existingLead.status,
+        newValue: leadData.status,
+        user: userStr,
+        notes: leadData.notes || `Pipeline status advanced from ${existingLead.status} to ${leadData.status}`
+      });
+    }
+
+    if (leadData.mood && leadData.mood !== existingLead.mood) {
+      newTimelineItems.push({
+        date: dateStr,
+        time: timeStr,
+        action: 'Mood Changed',
+        previousValue: existingLead.mood || 'N/A',
+        newValue: leadData.mood,
+        user: userStr,
+        notes: `Mood set to ${leadData.mood}`
+      });
+    }
+
+    if (leadData.buyingIntent && leadData.buyingIntent !== existingLead.buyingIntent) {
+      newTimelineItems.push({
+        date: dateStr,
+        time: timeStr,
+        action: 'Buying Intent Changed',
+        previousValue: existingLead.buyingIntent || 'N/A',
+        newValue: leadData.buyingIntent,
+        user: userStr,
+        notes: `Buying Intent set to ${leadData.buyingIntent}`
+      });
+    }
+
+    if (customAction) {
+      newTimelineItems.push({
+        date: dateStr,
+        time: timeStr,
+        action: customAction,
+        previousValue: '',
+        newValue: '',
+        user: userStr,
+        notes: customNotes || ''
+      });
+    }
+
+    const updatedTimeline = [...(existingLead.timeline || []), ...newTimelineItems];
+
+    const tentativeLead: Lead = {
+      ...existingLead,
+      ...leadData,
+      timeline: updatedTimeline
+    };
+
+    const { score, health } = calculateLeadScoreAndHealth(tentativeLead, followUps);
+
+    const finalUpdatedData = {
+      ...leadData,
+      timeline: updatedTimeline,
+      leadScore: score,
+      health: health,
+      lastContactDate: (customAction && (customAction.includes('Call') || customAction.includes('WhatsApp'))) 
+        ? dateStr 
+        : (leadData.lastContactDate || existingLead.lastContactDate || existingLead.createdAt.split('T')[0])
+    };
+
+    delete (finalUpdatedData as any).id;
 
     const docRef = doc(db, 'leads', id);
     try {
-      await updateDoc(docRef, sanitizeForFirestore(updatedData));
+      await updateDoc(docRef, sanitizeForFirestore(finalUpdatedData));
+      await logActivity('lead_updated', `Updated lead: ${existingLead.name} (${customAction || 'Details Updated'})`);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `leads/${id}`);
+      throw error;
     }
-    await logActivity('lead_updated', `Updated lead: ${leadData.name || 'Lead'}`);
   };
 
   const deleteLead = async (id: string) => {
@@ -653,7 +779,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     status: Task['status'] = 'Pending',
     clientId?: string,
     clientName?: string,
-    notes?: string
+    notes?: string,
+    leadId?: string,
+    leadName?: string,
+    assignedTo?: Task['assignedTo'],
+    priority?: Task['priority'],
+    plannerActivityId?: string
   ) => {
     if (!currentUser) throw new Error("User must be authenticated");
 
@@ -665,6 +796,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       type,
       clientId: clientId || null,
       clientName: clientName || null,
+      leadId: leadId || null,
+      leadName: leadName || null,
+      assignedTo: assignedTo || null,
+      priority: priority || 'Medium',
+      plannerActivityId: plannerActivityId || null,
       notes: notes || '',
       createdBy: currentUser.uid,
       createdAt: new Date().toISOString()
@@ -677,7 +813,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       handleFirestoreError(error, OperationType.CREATE, 'tasks');
       return;
     }
-    await logActivity('task_added', `Created task: "${title}" (${type}) due by ${dueDate}`);
+    const assignStr = assignedTo ? ` assigned to ${assignedTo}` : '';
+    await logActivity('task_added', `Created task: "${title}" (${type})${assignStr} due by ${dueDate}`);
 
     // Fetch matching client to get businessName for the Telegram notification
     const matchedClient = clients.find(c => c.id === clientId);
@@ -686,7 +823,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await sendTelegramNotification("", "followup_created", {
       ...newTask,
       id: docRef.id,
-      businessName
+      businessName,
+      address: matchedClient?.address,
+      notes: matchedClient?.notes
     });
   };
 
@@ -765,7 +904,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     await logActivity('followup_added', `Scheduled follow-up for client ${followUpData.clientName} on ${followUpData.followUpDate} at ${followUpData.followUpTime}`, followUpData.clientId);
-    await sendTelegramNotification("", "followup_created", { ...newFollowUpDoc, id: docRef.id });
+    const matchedClient = clients.find(c => c.id === followUpData.clientId);
+    await sendTelegramNotification("", "followup_created", { 
+      ...newFollowUpDoc, 
+      id: docRef.id,
+      address: matchedClient?.address,
+      notes: matchedClient?.notes
+    });
   };
 
   const updateFollowUp = async (id: string, followUpData: Partial<FollowUp>) => {
@@ -786,16 +931,27 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       const existing = followUps.find(f => f.id === id);
       const name = existing?.clientName || 'Client';
+      const matchedClient = clients.find(c => c.id === existing?.clientId);
       
       if (updatedData.status === 'Completed') {
         await logActivity('followup_updated', `Marked follow-up for ${name} as Completed`, existing?.clientId);
       } else if (updatedData.status === 'Missed') {
         // Trigger instant Missed telegram alert
-        sendTelegramNotification("", "followup_missed", { ...existing, ...updatedData });
+        sendTelegramNotification("", "followup_missed", { 
+          ...existing, 
+          ...updatedData,
+          address: matchedClient?.address,
+          notes: matchedClient?.notes
+        });
         await logActivity('followup_updated', `Marked follow-up for ${name} as Missed`, existing?.clientId);
       } else if (updatedData.status === 'Rescheduled') {
         // Trigger instant Rescheduled notification
-        sendTelegramNotification("", "followup_rescheduled", { ...existing, ...updatedData });
+        sendTelegramNotification("", "followup_rescheduled", { 
+          ...existing, 
+          ...updatedData,
+          address: matchedClient?.address,
+          notes: matchedClient?.notes
+        });
         await logActivity('followup_updated', `Rescheduled follow-up for ${name} to ${updatedData.followUpDate} ${updatedData.followUpTime}`, existing?.clientId);
       } else {
         await logActivity('followup_updated', `Updated follow-up settings for ${name}`, existing?.clientId);
@@ -891,62 +1047,98 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Compute Dashboard Stats
-  const todayStr = new Date().toISOString().split('T')[0];
-  
-  // Calculate revenue from active/expired clients
-  const totalRevenue = clients.reduce((acc, c) => acc + (c.revenue || 0), 0);
-  const pendingPayments = clients.reduce((acc, c) => acc + (c.pendingAmount || 0), 0);
-  
-  // Monthly revenue is revenue from clients whose start date is in the current month
-  const currentMonthYear = todayStr.substring(0, 7); // YYYY-MM
-  const monthlyRevenue = clients
-    .filter(c => c.startDate && c.startDate.startsWith(currentMonthYear))
-    .reduce((acc, c) => acc + (c.revenue || 0), 0);
+  const stats = useMemo<DashboardStats>(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // Calculate revenue from active/expired clients
+    const totalRevenue = clients.reduce((acc, c) => acc + (c.revenue || 0), 0);
+    const pendingPayments = clients.reduce((acc, c) => acc + (c.pendingAmount || 0), 0);
+    
+    // Monthly revenue is revenue from clients whose start date is in the current month
+    const currentMonthYear = todayStr.substring(0, 7); // YYYY-MM
+    const monthlyRevenue = clients
+      .filter(c => c.startDate && c.startDate.startsWith(currentMonthYear))
+      .reduce((acc, c) => acc + (c.revenue || 0), 0);
 
-  const activeClients = clients.filter(c => c.status === 'Active').length;
-  const expiredClients = clients.filter(c => c.status === 'Expired').length;
-  const todayTasksCount = tasks.filter(t => t.dueDate === todayStr && !t.completed).length;
+    const activeClients = clients.filter(c => c.status === 'Active').length;
+    const expiredClients = clients.filter(c => c.status === 'Expired').length;
+    const todayTasksCount = tasks.filter(t => t.dueDate === todayStr && !t.completed).length;
 
-  const stats: DashboardStats = {
-    totalClients: clients.length,
-    activeClients,
-    expiredClients,
-    totalRevenue,
-    pendingPayments,
-    monthlyRevenue,
-    todayTasksCount
-  };
+    return {
+      totalClients: clients.length,
+      activeClients,
+      expiredClients,
+      totalRevenue,
+      pendingPayments,
+      monthlyRevenue,
+      todayTasksCount
+    };
+  }, [clients, tasks]);
+
+  const providerValue = useMemo(() => ({
+    clients,
+    leads,
+    tasks,
+    activities,
+    followUps,
+    telegramSettings,
+    brandSettings,
+    loading,
+    currentUser,
+    setCurrentUser,
+    teamMembers,
+    addClient,
+    updateClient,
+    deleteClient,
+    addLead,
+    updateLead,
+    deleteLead,
+    convertLeadToClient,
+    addTask,
+    toggleTask,
+    updateTask,
+    deleteTask,
+    addFollowUp,
+    updateFollowUp,
+    deleteFollowUp,
+    logActivity,
+    updateTelegramSettings,
+    updateBrandSettings,
+    sendTelegramNotification,
+    stats
+  }), [
+    clients,
+    leads,
+    tasks,
+    activities,
+    followUps,
+    telegramSettings,
+    brandSettings,
+    loading,
+    currentUser,
+    addClient,
+    updateClient,
+    deleteClient,
+    addLead,
+    updateLead,
+    deleteLead,
+    convertLeadToClient,
+    addTask,
+    toggleTask,
+    updateTask,
+    deleteTask,
+    addFollowUp,
+    updateFollowUp,
+    deleteFollowUp,
+    logActivity,
+    updateTelegramSettings,
+    updateBrandSettings,
+    sendTelegramNotification,
+    stats
+  ]);
 
   return (
-    <CRMContext.Provider value={{
-      clients,
-      leads,
-      tasks,
-      activities,
-      followUps,
-      telegramSettings,
-      brandSettings,
-      loading,
-      addClient,
-      updateClient,
-      deleteClient,
-      addLead,
-      updateLead,
-      deleteLead,
-      convertLeadToClient,
-      addTask,
-      toggleTask,
-      updateTask,
-      deleteTask,
-      addFollowUp,
-      updateFollowUp,
-      deleteFollowUp,
-      logActivity,
-      updateTelegramSettings,
-      updateBrandSettings,
-      sendTelegramNotification,
-      stats
-    }}>
+    <CRMContext.Provider value={providerValue}>
       {children}
     </CRMContext.Provider>
   );

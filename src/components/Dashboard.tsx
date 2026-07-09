@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { formatCurrency, formatDate } from '../utils';
 import { 
@@ -71,7 +71,7 @@ export const Dashboard: React.FC = () => {
     }));
   };
 
-  const chartData = getRevenueChartData();
+  const chartData = useMemo(() => getRevenueChartData(), [clients]);
 
   // Filter tasks for today's checklist
   const todayStr = new Date().toISOString().split('T')[0];

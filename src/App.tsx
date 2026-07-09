@@ -20,12 +20,12 @@ export default function App() {
   return (
     <CRMProvider>
       <CRMLayout activeTab={activeTab} setActiveTab={setActiveTab} user={mockUser}>
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'clients' && <ClientManagement />}
-        {activeTab === 'leads' && <LeadManagement />}
-        {activeTab === 'tasks' && <TaskManagement />}
-        {activeTab === 'reports' && <Reports />}
-        {activeTab === 'telegram' && <TelegramSettings />}
+        <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}><Dashboard /></div>
+        <div className={activeTab === 'clients' ? 'block' : 'hidden'}><ClientManagement /></div>
+        <div className={activeTab === 'leads' ? 'block' : 'hidden'}><LeadManagement /></div>
+        <div className={activeTab === 'tasks' ? 'block' : 'hidden'}><TaskManagement /></div>
+        <div className={activeTab === 'reports' ? 'block' : 'hidden'}><Reports /></div>
+        <div className={activeTab === 'telegram' ? 'block' : 'hidden'}><TelegramSettings /></div>
       </CRMLayout>
     </CRMProvider>
   );

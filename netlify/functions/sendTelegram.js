@@ -3,10 +3,66 @@ const formatTelegramMessage = (eventType, data, messageText) => {
     return messageText || `🔔 *AB Graphics CRM Bot Test*\n\nYour Telegram Bot settings have been saved successfully!\n\n🤖 *Bot Status:* Online & Connected\n📅 *Server Time:* ${new Date().toLocaleString('en-IN')}\n🚀 *System:* Ready to push active lead & renewal notifications.`;
   }
 
-  // Client (New Client Created, Client Push Button, Client Expiry Reminder, Package Renewed)
-  if (eventType === 'client_created' || eventType === 'client_updated') {
-    const isNew = eventType === 'client_created';
-    const header = isNew ? '🆕 *New Client Created*' : '👤 *Client Details*';
+  // Client Address & Campaign Objectives & Strategy Directive helper extraction
+  const getClientInfoSuffix = () => {
+    const address = data?.address || data?.clientAddress || 'Not Provided';
+    const notes = data?.notes || data?.clientNotes || data?.campaignObjectives || 'Not Provided';
+    return `\n\n📍 *Client Address:* ${address}\n🎯 *Campaign Objectives & Strategy Directive:* ${notes}`;
+  };
+
+  if (eventType === 'client_created') {
+    const name = data?.name || 'Not Provided';
+    const business = data?.businessName || 'Not Provided';
+    const mobile = data?.mobile || 'Not Provided';
+    const email = data?.email || 'Not Provided';
+    const address = data?.address || 'Not Provided';
+    const website = data?.website || 'Not Provided';
+    const mapsLink = data?.googleMapsLink || data?.googleMaps || 'Not Provided';
+
+    const packageName = data?.packageDetails?.customName || data?.packageDetails?.type || 'Custom';
+    const price = data?.packageDetails?.price ?? 0;
+    const paidAmount = data?.revenue ?? 0;
+    const pending = data?.pendingAmount ?? 0;
+
+    const startDate = data?.startDate || 'Not Provided';
+    const expiryDate = data?.expiryDate || 'Not Provided';
+    const duration = data?.packageDuration || data?.packageDetails?.duration || 'Not Provided';
+
+    const campaignObjectives = data?.notes || 'Not Provided';
+
+    const services = data?.packageDetails?.services;
+    const servicesStr = Array.isArray(services) && services.length > 0
+      ? services.map(s => `• ${s}`).join('\n')
+      : 'Not Provided';
+
+    const internalNotes = data?.internalNotes || 'Not Provided';
+
+    const createdAtStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    return `🆕 *NEW CLIENT ADDED*\n\n` +
+      `👤 *Client Name:* ${name}\n` +
+      `🏢 *Business Name:* ${business}\n` +
+      `📱 *Mobile Number:* ${mobile}\n` +
+      `📧 *Email:* ${email}\n` +
+      `📍 *Full Address:* ${address}\n` +
+      `🌐 *Website:* ${website}\n` +
+      `📍 *Google Maps Link:* ${mapsLink}\n\n` +
+      `📦 *Package Name:* ${packageName}\n` +
+      `💰 *Package Price:* ₹${price}\n` +
+      `💵 *Amount Paid:* ₹${paidAmount}\n` +
+      `💳 *Pending Amount:* ₹${pending}\n\n` +
+      `📅 *Start Date:* ${startDate}\n` +
+      `📅 *Expiry Date:* ${expiryDate}\n` +
+      `⏳ *Package Duration:* ${duration}\n\n` +
+      `🎯 *Campaign Objectives:*\n${campaignObjectives}\n\n` +
+      `📝 *Included Services:*\n${servicesStr}\n\n` +
+      `📌 *Notes:*\n${internalNotes}\n\n` +
+      `👨‍💼 *Created By:*\nAB Graphics CRM\n\n` +
+      `🕒 *Created At:*\n${createdAtStr}`;
+  }
+
+  // Client Details (Client Push Button / Update)
+  if (eventType === 'client_updated') {
     const name = data?.name || 'N/A';
     const business = data?.businessName || 'N/A';
     const mobile = data?.mobile || 'N/A';
@@ -16,7 +72,7 @@ const formatTelegramMessage = (eventType, data, messageText) => {
     const startDate = data?.startDate || 'N/A';
     const expiryDate = data?.expiryDate || 'N/A';
 
-    return `${header}\n\n` +
+    return `👤 *Client Details*\n\n` +
       `• *Name:* ${name}\n` +
       `• *Business:* ${business}\n` +
       `• *Mobile:* ${mobile}\n` +
@@ -24,28 +80,39 @@ const formatTelegramMessage = (eventType, data, messageText) => {
       `• *Amount:* ₹${price}\n` +
       `• *Pending:* ₹${pending}\n` +
       `• *Start Date:* ${startDate}\n` +
-      `• *Expiry Date:* ${expiryDate}`;
+      `• *Expiry Date:* ${expiryDate}` +
+      getClientInfoSuffix();
   }
 
-  // New Lead Created / Lead Push Button
+  // New Lead Created / Lead Push/Update Button
   if (eventType === 'lead_created' || eventType === 'lead_updated') {
-    const header = eventType === 'lead_created' ? '🆕 *New Lead Created*' : '📊 *Lead Details*';
+    const header = eventType === 'lead_created' ? '🆕 *NEW LEAD RECEIVED*' : '📌 *LEAD UPDATE*';
     const name = data?.name || 'N/A';
-    const mobile = data?.mobile || 'N/A';
     const business = data?.business || 'N/A';
-    const source = data?.leadSource || 'N/A';
+    const mobile = data?.mobile || 'N/A';
+    const address = data?.address || 'Not Provided';
+    const score = data?.leadScore ?? 'N/A';
+    const health = data?.health ? (data.health === 'Healthy' ? '🟢 Healthy' : data.health === 'Needs Attention' ? '🟡 Needs Attention' : '🔴 At Risk') : 'N/A';
+    const mood = data?.mood ? `${data.mood}` : 'Neutral';
+    const buyingIntent = data?.buyingIntent || 'N/A';
+    const expectedRevenue = data?.expectedRevenue ? `₹${data.expectedRevenue}` : 'N/A';
+    const status = data?.status || 'N/A';
     const notes = data?.notes || 'None';
-    const createdDate = data?.createdAt 
-      ? new Date(data.createdAt).toLocaleDateString('en-IN') 
-      : new Date().toLocaleDateString('en-IN');
+    const updatedTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
 
     return `${header}\n\n` +
-      `• *Name:* ${name}\n` +
-      `• *Mobile:* ${mobile}\n` +
-      `• *Business:* ${business}\n` +
-      `• *Source:* ${source}\n` +
-      `• *Notes:* ${notes}\n` +
-      `• *Date:* ${createdDate}`;
+      `👤 *Client:* ${name}\n` +
+      `🏢 *Business:* ${business}\n` +
+      `📞 *Phone:* ${mobile}\n` +
+      `📍 *Address:* ${address}\n` +
+      `📊 *Lead Score:* ${score}\n` +
+      `🟢 *Health:* ${health}\n` +
+      `😊 *Mood:* ${mood}\n` +
+      `🔥 *Buying Intent:* ${buyingIntent}\n` +
+      `💰 *Expected Revenue:* ${expectedRevenue}\n` +
+      `📈 *Status:* ${status}\n` +
+      `📝 *Notes:* ${notes}\n\n` +
+      `🕒 *Updated Time:* ${updatedTime}`;
   }
 
   // Task vs Schedule (followup_created)
@@ -62,7 +129,8 @@ const formatTelegramMessage = (eventType, data, messageText) => {
         `• *Title:* ${title}\n` +
         `• *Date:* ${date}\n` +
         `• *Time:* ${time}\n` +
-        `• *Assigned Client:* ${client}`;
+        `• *Assigned Client:* ${client}` +
+        getClientInfoSuffix();
     } else {
       // It's a Task
       const header = '📌 *New Task Created*';
@@ -77,7 +145,8 @@ const formatTelegramMessage = (eventType, data, messageText) => {
         `• *Client:* ${client}\n` +
         `• *Due Date:* ${dueDate}\n` +
         `• *Priority:* ${priority}\n` +
-        `• *Status:* ${status}`;
+        `• *Status:* ${status}` +
+        getClientInfoSuffix();
     }
   }
 
@@ -91,7 +160,8 @@ const formatTelegramMessage = (eventType, data, messageText) => {
     return `${header}\n\n` +
       `• *Client:* ${client}\n` +
       `• *Amount:* ₹${amount}\n` +
-      `• *Remaining Balance:* ₹${remaining}`;
+      `• *Remaining Balance:* ₹${remaining}` +
+      getClientInfoSuffix();
   }
 
   // Package Renewed
@@ -108,7 +178,8 @@ const formatTelegramMessage = (eventType, data, messageText) => {
       `• *Package:* ${packageName}\n` +
       `• *Amount:* ₹${amount}\n` +
       `• *Start Date:* ${startDate}\n` +
-      `• *Expiry Date:* ${expiryDate}`;
+      `• *Expiry Date:* ${expiryDate}` +
+      getClientInfoSuffix();
   }
 
   // Client Expiry Reminder / package_expired
@@ -121,13 +192,14 @@ const formatTelegramMessage = (eventType, data, messageText) => {
     return `${header}\n\n` +
       `• *Client:* ${client}\n` +
       `• *Package:* ${packageName}\n` +
-      `• *Expiry Date:* ${expiryDate}`;
+      `• *Expiry Date:* ${expiryDate}` +
+      getClientInfoSuffix();
   }
 
   if (eventType === 'followup_missed') {
     const client = data?.clientName || 'N/A';
     const mobile = data?.mobile || 'N/A';
-    return `⚠️ *FOLLOW-UP MISSED*\n\n• *Client:* ${client}\n• *Mobile:* ${mobile}\n\nPlease contact immediately.`;
+    return `⚠️ *FOLLOW-UP MISSED*\n\n• *Client:* ${client}\n• *Mobile:* ${mobile}\n\nPlease contact immediately.` + getClientInfoSuffix();
   }
 
   if (eventType === 'followup_rescheduled') {
@@ -136,7 +208,7 @@ const formatTelegramMessage = (eventType, data, messageText) => {
     const date = data?.followUpDate || 'N/A';
     const time = data?.followUpTime || 'N/A';
     const notes = data?.notes || 'N/A';
-    return `🔄 *Schedule Rescheduled*\n\n• *Client:* ${client}\n• *Business:* ${business}\n• *Date:* ${date}\n• *Time:* ${time}\n• *Notes:* ${notes}`;
+    return `🔄 *Schedule Rescheduled*\n\n• *Client:* ${client}\n• *Business:* ${business}\n• *Date:* ${date}\n• *Time:* ${time}\n• *Notes:* ${notes}` + getClientInfoSuffix();
   }
 
   return messageText || 'Notification from AB Graphics CRM';

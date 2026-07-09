@@ -15,6 +15,43 @@ export interface ClientPackage {
   services: string[]; // Selected services
 }
 
+export interface ActivityProof {
+  instagramLink?: string;
+  facebookLink?: string;
+  canvaLink?: string;
+  googleDriveLink?: string;
+  screenshot?: string; // Base64 or image url
+  referenceLink?: string;
+}
+
+export interface DailyActivity {
+  id: string;
+  type: string;
+  customTypeName?: string; // If type is "Custom Activity"
+  status: 'Planned' | 'In Progress' | 'Waiting For Client Approval' | 'Approved' | 'Posted' | 'Completed' | 'Cancelled';
+  proof?: ActivityProof;
+  notes?: string;
+}
+
+export interface DayPlan {
+  date: string; // YYYY-MM-DD
+  activities: DailyActivity[];
+  internalNotes?: string;
+  clientNotes?: string;
+}
+
+export interface ContentPlanner {
+  planType?: '7 Days' | '15 Days' | '30 Days' | 'Custom';
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  days: Record<string, DayPlan>; // Keyed by YYYY-MM-DD
+  aiStrategy?: {
+    strategyTitle: string;
+    highLevelStrategy: string;
+    keyMetrics: string;
+  };
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -37,6 +74,18 @@ export interface Client {
   createdAt: string;
   packageDetails?: ClientPackage;
   payments?: Payment[];
+  contentPlanner?: ContentPlanner;
+}
+
+export interface LeadTimelineItem {
+  id?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+  action: string;
+  previousValue?: string;
+  newValue?: string;
+  user: string;
+  notes?: string;
 }
 
 export interface Lead {
@@ -46,10 +95,36 @@ export interface Lead {
   mobile: string;
   leadSource: string; // e.g. Facebook, Instagram, Google, Website, Reference, Direct, Other
   followUpDate: string; // YYYY-MM-DD
-  status: 'New' | 'Contacted' | 'In Progress' | 'Converted' | 'Lost';
+  status: 'New' | 'Contacted' | 'Meeting Scheduled' | 'Meeting Done' | 'Proposal / Quotation Sent' | 'In Progress' | 'Interested' | 'Negotiation' | 'Waiting For Client Decision' | 'Payment Pending' | 'Converted' | 'Lost';
   notes: string;
   createdBy: string;
   createdAt: string;
+  
+  // New Digital Marketing Agency fields
+  address?: string;
+  email?: string;
+  website?: string;
+  googleMapsLink?: string;
+  
+  mood?: 'Very Positive' | 'Positive' | 'Neutral' | 'Thinking' | 'Confused' | 'Negative' | 'Not Interested';
+  buyingIntent?: 'Low' | 'Medium' | 'High' | 'Very High';
+  priority?: 'Low' | 'Medium' | 'High';
+  
+  expectedRevenue?: number;
+  expectedPackage?: string;
+  expectedClosingMonth?: string;
+  interestedService?: string;
+  budgetRange?: string;
+  decisionMaker?: string;
+  
+  meetingOutcome?: 'Very Interested' | 'Interested' | 'Need Time' | 'Budget Issue' | 'Partner Approval Pending' | 'Already Working With Someone' | 'Not Interested' | 'Other';
+  meetingNotes?: string;
+  objections?: string[];
+  
+  lastContactDate?: string; // YYYY-MM-DD
+  timeline?: LeadTimelineItem[];
+  leadScore?: number;
+  health?: 'Healthy' | 'Needs Attention' | 'At Risk';
 }
 
 export interface Task {
@@ -61,6 +136,11 @@ export interface Task {
   type: 'Shoot' | 'Editing' | 'Poster' | 'Ads' | 'Website' | 'Printing';
   clientId?: string;
   clientName?: string;
+  leadId?: string;
+  leadName?: string;
+  assignedTo?: 'Bhargav' | 'Adhwaryu' | 'Pari';
+  priority?: 'Low' | 'Medium' | 'High';
+  plannerActivityId?: string; // Linked activity ID in a client's planner
   notes?: string;
   createdBy: string;
   createdAt: string;
@@ -114,3 +194,39 @@ export interface DashboardStats {
   monthlyRevenue: number;
   todayTasksCount: number;
 }
+
+export interface CRMUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'Owner' | 'Team Member';
+  title: string;
+  permissions: string[];
+}
+
+export const teamMembers: CRMUser[] = [
+  {
+    uid: 'bhargav',
+    email: 'bhargav@abgraphics.com',
+    displayName: 'Bhargav',
+    role: 'Owner',
+    title: 'Creative Head',
+    permissions: ['all']
+  },
+  {
+    uid: 'adhwaryu',
+    email: 'adhwaryu@abgraphics.com',
+    displayName: 'Adhwaryu',
+    role: 'Team Member',
+    title: 'Client Handling & Operations',
+    permissions: ['clients', 'leads', 'operations']
+  },
+  {
+    uid: 'pari',
+    email: 'pari@abgraphics.com',
+    displayName: 'Pari',
+    role: 'Team Member',
+    title: 'Assistant & Content Planner',
+    permissions: ['assistant', 'scheduling', 'reports', 'planner', 'followups']
+  }
+];

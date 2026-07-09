@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { calculateExpiryDate, formatCurrency, formatDate } from '../utils';
 import { Client, Payment, ClientPackage } from '../types';
+import { ContentPlanner } from './ContentPlanner';
 import { defaultLogo, defaultQr } from '../defaultAssets';
 import { 
   Plus, 
@@ -56,6 +57,59 @@ export const AVAILABLE_SERVICES = [
   'Custom Service'
 ];
 
+const getCleanErrorMessage = (err: any): string => {
+  const msg = err?.message || String(err);
+  if (msg.trim().startsWith('<') || msg.toLowerCase().includes('<!doctype') || msg.toLowerCase().includes('html')) {
+    return 'Server error (please verify your network connection and try again).';
+  }
+  return msg;
+};
+
+const formatClientTelegramMessage = (client: Client): string => {
+  const getVal = (val: any) => {
+    if (val === undefined || val === null || String(val).trim() === '') {
+      return 'Not Provided';
+    }
+    return String(val).trim();
+  };
+
+  const getCurrencyVal = (val: any) => {
+    if (val === undefined || val === null || String(val).trim() === '') {
+      return 'Not Provided';
+    }
+    return `₹${val}`;
+  };
+
+  const packageName = client.packageDetails?.customName || client.packageDetails?.type;
+  const packageValue = client.packageDetails?.price;
+  const paidAmount = client.revenue;
+  const pendingAmount = client.pendingAmount;
+
+  const updatedAtStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  return `📌 CLIENT UPDATE PUSHED
+
+👤 Client Name: ${getVal(client.name)}
+🏢 Business: ${getVal(client.businessName)}
+📱 Phone: ${getVal(client.mobile)}
+📧 Email: ${getVal(client.email)}
+📍 Address: ${getVal(client.address)}
+
+📦 Package: ${getVal(packageName)}
+💰 Package Value: ${getCurrencyVal(packageValue)}
+💵 Paid: ${getCurrencyVal(paidAmount)}
+💳 Pending: ${getCurrencyVal(pendingAmount)}
+
+📅 Start Date: ${getVal(client.startDate)}
+📅 Expiry Date: ${getVal(client.expiryDate)}
+
+🎯 Campaign Objectives & Strategy Directive:
+${getVal(client.notes)}
+
+📝 Notes: ${getVal(client.notes)}
+🕒 Updated At: ${updatedAtStr}`;
+};
+
 export const ClientManagement: React.FC = () => {
   const { 
     clients, 
@@ -79,7 +133,12 @@ export const ClientManagement: React.FC = () => {
   const handleSendFollowUpTelegram = async (f: any) => {
     setIsFollowUpTelegramSending(prev => ({ ...prev, [f.id]: true }));
     try {
-      await sendTelegramNotification("", "followup_created", f);
+      const matchedClient = clients.find(c => c.id === f.clientId);
+      await sendTelegramNotification("", "followup_created", {
+        ...f,
+        address: matchedClient?.address,
+        notes: matchedClient?.notes
+      });
       alert(`Success: Telegram notification sent for scheduled task!`);
     } catch (err: any) {
       console.error("Failed to send Telegram follow-up:", err);
@@ -134,11 +193,14 @@ export const ClientManagement: React.FC = () => {
   const handleSendTelegramUpdate = async (client: Client) => {
     setIsTelegramSending(prev => ({ ...prev, [client.id]: true }));
     try {
-      await sendTelegramNotification("", "client_updated", client);
-      alert(`Success: Telegram notification sent for ${client.name}!`);
+      const latestClient = clients.find(c => c.id === client.id) || client;
+      const messageText = formatClientTelegramMessage(latestClient);
+      await sendTelegramNotification(messageText, "custom");
+      showToast(`🎉 Client profile pushed to Telegram successfully!`, "success");
     } catch (err: any) {
       console.error("Failed to send Telegram update:", err);
-      alert(`Error sending Telegram update: ${err.message || err}`);
+      const cleanMsg = getCleanErrorMessage(err);
+      showToast(`❌ Failed: ${cleanMsg}`, "error");
     } finally {
       setIsTelegramSending(prev => ({ ...prev, [client.id]: false }));
     }
@@ -272,7 +334,7 @@ export const ClientManagement: React.FC = () => {
   const [initialPaymentNotes, setInitialPaymentNotes] = useState('');
 
   // Client Details Tab
-  const [activeDetailTab, setActiveDetailTab] = useState<'overview' | 'package' | 'payments' | 'followups'>('overview');
+  const [activeDetailTab, setActiveDetailTab] = useState<'overview' | 'package' | 'payments' | 'followups' | 'planner'>('overview');
 
   // New payment log states inside detail modal
   const [payAmount, setPayAmount] = useState<number>(0);
@@ -595,19 +657,21 @@ export const ClientManagement: React.FC = () => {
   };
 
   // Filter & Search Logic
-  const filteredClients = clients.filter(c => {
-    const matchesSearch = 
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.mobile.includes(searchTerm);
+  const filteredClients = useMemo(() => {
+    return clients.filter(c => {
+      const matchesSearch = 
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.mobile.includes(searchTerm);
 
-    const matchesStatus = 
-      statusFilter === 'All' || 
-      c.status === statusFilter;
+      const matchesStatus = 
+        statusFilter === 'All' || 
+        c.status === statusFilter;
 
-    return matchesSearch && matchesStatus;
-  });
+      return matchesSearch && matchesStatus;
+    });
+  }, [clients, searchTerm, statusFilter]);
 
   return (
     <div className="space-y-6 font-sans">
@@ -765,21 +829,32 @@ export const ClientManagement: React.FC = () => {
                     <span className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest">Client Console</span>
                     <div className="flex gap-1.5">
                       <a
+                        href={`tel:${client.mobile}`}
+                        className="px-2.5 py-1 bg-[#0d0d0d] hover:bg-[#1e1e1e] border border-emerald-900/10 text-gray-400 hover:text-white rounded-lg transition-all text-[10px] font-bold flex items-center gap-1 h-7 cursor-pointer"
+                        title="Call Mobile"
+                      >
+                        <Phone className="h-3.5 w-3.5 shrink-0" /> Call
+                      </a>
+                      <a
                         href={`https://wa.me/${client.whatsApp.replace(/[^0-9]/g, '')}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/20 rounded-md transition-all text-[10px] font-bold flex items-center gap-1"
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/20 rounded-lg transition-all text-[10px] font-bold flex items-center gap-1 h-7 cursor-pointer"
                         title="WhatsApp Chat"
                       >
-                        <MessageSquare className="h-3 w-3 shrink-0" /> WA
+                        <MessageSquare className="h-3.5 w-3.5 shrink-0" /> WA
                       </a>
-                      <a
-                        href={`tel:${client.mobile}`}
-                        className="p-1 bg-[#0d0d0d] hover:bg-[#1e1e1e] border border-emerald-900/10 text-gray-400 hover:text-white rounded-md transition-colors flex items-center"
-                        title="Call Mobile"
+                      <button
+                        onClick={() => {
+                          setSelectedClient(client);
+                          setActiveDetailTab('planner');
+                          setIsDetailOpen(true);
+                        }}
+                        className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-slate-950 border border-amber-500/20 rounded-lg transition-all text-[10px] font-bold flex items-center gap-1 h-7 cursor-pointer"
+                        title="Content Planner"
                       >
-                        <Phone className="h-3 w-3" />
-                      </a>
+                        <Calendar className="h-3.5 w-3.5 shrink-0" /> Plan
+                      </button>
                     </div>
                   </div>
 
@@ -796,7 +871,18 @@ export const ClientManagement: React.FC = () => {
                       {isTelegramSending[client.id] ? 'Sending...' : 'Push to Telegram'}
                     </button>
 
-                    {/* 2. Add Payment */}
+                    {/* 2. Edit Client */}
+                    <button
+                      id={`edit-${client.id}`}
+                      onClick={() => openEditModal(client)}
+                      className="flex items-center gap-2 px-3 py-2 bg-purple-500/5 hover:bg-purple-500 border border-purple-500/10 hover:border-purple-500 text-purple-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
+                      title="Modify Campaign Parameters"
+                    >
+                      <Edit className="h-3.5 w-3.5 shrink-0" />
+                      Edit Client
+                    </button>
+
+                    {/* 3. Add Payment */}
                     <button
                       id={`add-pay-${client.id}`}
                       onClick={() => {
@@ -812,7 +898,21 @@ export const ClientManagement: React.FC = () => {
                       Add Payment
                     </button>
 
-                    {/* 3. Schedule Follow-up */}
+                    {/* 4. Generate Invoice */}
+                    <button
+                      id={`invoice-${client.id}`}
+                      onClick={() => {
+                        setInvoiceClient(client);
+                        setIsInvoiceOpen(true);
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 bg-teal-500/5 hover:bg-teal-500 border border-teal-500/10 hover:border-teal-500 text-teal-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
+                      title="Print or Download Corporate Invoice"
+                    >
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      Invoice
+                    </button>
+
+                    {/* 5. Schedule Follow-up */}
                     <button
                       id={`follow-up-${client.id}`}
                       onClick={() => {
@@ -828,7 +928,7 @@ export const ClientManagement: React.FC = () => {
                       Follow-up
                     </button>
 
-                    {/* 4. Renew Package */}
+                    {/* 6. Renew Package */}
                     <button
                       id={`renew-${client.id}`}
                       onClick={() => {
@@ -845,31 +945,6 @@ export const ClientManagement: React.FC = () => {
                     >
                       <RefreshCw className="h-3.5 w-3.5 shrink-0" />
                       Renew Package
-                    </button>
-
-                    {/* 5. Edit Client */}
-                    <button
-                      id={`edit-${client.id}`}
-                      onClick={() => openEditModal(client)}
-                      className="flex items-center gap-2 px-3 py-2 bg-purple-500/5 hover:bg-purple-500 border border-purple-500/10 hover:border-purple-500 text-purple-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
-                      title="Modify Campaign Parameters"
-                    >
-                      <Edit className="h-3.5 w-3.5 shrink-0" />
-                      Edit Client
-                    </button>
-
-                    {/* 6. Generate Invoice */}
-                    <button
-                      id={`invoice-${client.id}`}
-                      onClick={() => {
-                        setInvoiceClient(client);
-                        setIsInvoiceOpen(true);
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 bg-teal-500/5 hover:bg-teal-500 border border-teal-500/10 hover:border-teal-500 text-teal-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
-                      title="Print or Download Corporate Invoice"
-                    >
-                      <FileText className="h-3.5 w-3.5 shrink-0" />
-                      Invoice
                     </button>
 
                     {/* 7. Delete Client */}
@@ -1255,10 +1330,12 @@ export const ClientManagement: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-[#141414] border border-emerald-900/20 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            className={`bg-[#141414] border border-emerald-900/20 rounded-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh] transition-all duration-300 ${
+              activeDetailTab === 'planner' ? 'max-w-6xl md:w-[92vw]' : 'max-w-2xl'
+            }`}
           >
             {/* Detail Header */}
-            <div className="px-6 py-5 border-b border-emerald-900/10 flex justify-between items-start bg-[#0d0d0d]">
+            <div className="px-6 py-5 border-b border-emerald-900/10 flex justify-between items-center bg-[#0d0d0d] shrink-0">
               <div className="flex gap-4 items-center">
                 <div className="h-14 w-14 rounded-xl bg-[#090909] border border-emerald-900/10 overflow-hidden flex items-center justify-center shrink-0">
                   {selectedClient.profilePhoto ? (
@@ -1288,15 +1365,15 @@ export const ClientManagement: React.FC = () => {
             </div>
 
             {/* TAB SELECTOR BAR */}
-            <div className="flex border-b border-emerald-900/15 bg-[#0d0d0d] px-6">
-              {(['overview', 'package', 'payments', 'followups'] as const).map((tab) => (
+            <div className="relative z-10 flex border-b border-emerald-900/15 bg-[#0d0d0d] px-6 overflow-x-auto whitespace-nowrap scrollbar-none flex-nowrap shrink-0">
+              {(['overview', 'package', 'payments', 'followups', 'planner'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => {
                     setActiveDetailTab(tab);
                     setShowAddPaymentForm(false);
                   }}
-                  className={`px-4 py-3.5 text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+                  className={`px-4 py-3.5 text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer shrink-0 ${
                     activeDetailTab === tab
                       ? 'border-emerald-500 text-emerald-400'
                       : 'border-transparent text-gray-500 hover:text-gray-300'
@@ -1308,13 +1385,15 @@ export const ClientManagement: React.FC = () => {
                     ? 'Package Blueprint' 
                     : tab === 'payments' 
                     ? 'Payment Ledger' 
-                    : 'Follow-ups'}
+                    : tab === 'followups'
+                    ? 'Follow-ups'
+                    : '📅 Content Planner'}
                 </button>
               ))}
             </div>
 
             {/* Detail Body (Dynamic Tab rendering) */}
-            <div className="p-6 flex-1 overflow-y-auto space-y-6">
+            <div className={`flex-1 overflow-y-auto ${activeDetailTab === 'planner' ? 'p-4 md:p-6 space-y-4' : 'p-6 space-y-6'} min-h-0`}>
               
               {activeDetailTab === 'overview' && (
                 <motion.div 
@@ -1999,10 +2078,20 @@ export const ClientManagement: React.FC = () => {
                 </motion.div>
               )}
 
+              {activeDetailTab === 'planner' && (
+                <motion.div 
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="space-y-6"
+                >
+                  <ContentPlanner client={selectedClient} />
+                </motion.div>
+              )}
+
             </div>
 
             {/* Details Footer */}
-            <div className="px-6 py-4 border-t border-emerald-900/10 bg-[#0d0d0d] flex justify-between items-center">
+            <div className="px-6 py-4 border-t border-emerald-900/10 bg-[#0d0d0d] flex justify-between items-center shrink-0">
               <a
                 href={`https://wa.me/${selectedClient.whatsApp.replace(/[^0-9]/g, '')}`}
                 target="_blank"
