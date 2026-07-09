@@ -855,29 +855,23 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     customBotToken?: string,
     customChatId?: string
   ) => {
-    const finalBotToken = customBotToken || telegramSettings?.botToken;
-    const finalChatId = customChatId || telegramSettings?.chatId;
-    const isEnabled = customBotToken ? true : (telegramSettings?.enabled);
-
-    if (!finalBotToken || !finalChatId || !isEnabled) {
-      console.log("Telegram notifications disabled or unconfigured in client.");
-      return;
-    }
-
     try {
       const docId = (telegramSettings as any)?.id || 'default_user';
-      const response = await fetch('/api/telegram/notify', {
+      const idToken = '';
+
+      const response = await fetch('/.netlify/functions/sendTelegram', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           userId: docId,
+          idToken,
           eventType,
           messageText,
           data,
-          botToken: finalBotToken,
-          chatId: finalChatId
+          botToken: customBotToken || undefined,
+          chatId: customChatId || undefined
         })
       });
       if (!response.ok) {
