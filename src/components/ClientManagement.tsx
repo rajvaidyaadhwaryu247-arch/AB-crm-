@@ -2286,15 +2286,15 @@ export const ClientManagement: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#141414] border border-emerald-900/20 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            className="bg-[#141414] border border-emerald-900/20 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh] print:max-h-none print:overflow-visible print:border-none print:shadow-none print:rounded-none"
           >
-            {/* Header */}
+            {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-emerald-900/10 bg-[#0d0d0d] print:hidden">
               <h3 className="text-sm font-bold uppercase tracking-wider text-white">Client Corporate Invoice</h3>
               <div className="flex gap-2">
                 <button 
                   onClick={() => window.print()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 text-slate-950 text-xs font-bold uppercase tracking-wider rounded-lg hover:bg-emerald-400 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 text-slate-950 text-xs font-bold uppercase tracking-wider rounded-lg hover:bg-emerald-400 transition-colors shadow-lg"
                 >
                   <Download className="h-3.5 w-3.5" /> Print / PDF
                 </button>
@@ -2308,142 +2308,273 @@ export const ClientManagement: React.FC = () => {
             </div>
 
             {/* Printable Invoice Container */}
-            <div className="p-8 bg-white text-slate-900 overflow-y-auto flex-1 font-sans print:p-0">
-              {/* Invoice Brand Header */}
-              <div className="flex justify-between items-start border-b-2 border-emerald-600 pb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl bg-transparent flex items-center justify-center p-1 shrink-0 overflow-hidden border border-emerald-100">
-                    <img 
-                      src={brandSettings?.logo || defaultLogo} 
-                      alt="Company Logo" 
-                      className="max-h-full max-w-full object-contain mx-auto"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-black text-emerald-700 tracking-tight">AB GRAPHICS</h2>
-                    <p className="text-xs text-slate-500 font-semibold mt-0.5">Corporate Branding & Marketing Solutions</p>
-                    <p className="text-xs text-slate-400 mt-2">support@abgraphics.co | GSTIN: 27AABCA1234F1Z5</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <h1 className="text-xl font-bold uppercase tracking-widest text-slate-400">INVOICE</h1>
-                  <p className="text-xs font-mono text-slate-600 mt-1">Invoice #: INV-CRM-{Date.now().toString().slice(-6)}</p>
-                  <p className="text-xs text-slate-500 mt-1">Date: {new Date().toISOString().split('T')[0]}</p>
-                </div>
+            <div 
+              id="printable-invoice-area" 
+              className="relative p-8 md:p-12 bg-white text-slate-800 overflow-y-auto flex-1 font-sans print:p-0 print:overflow-visible print:static"
+              style={{ contentVisibility: 'auto' }}
+            >
+              {/* CSS Print Overrides */}
+              <style>{`
+                @media print {
+                  body * {
+                    visibility: hidden;
+                  }
+                  #printable-invoice-area, #printable-invoice-area * {
+                    visibility: visible;
+                  }
+                  #printable-invoice-area {
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    width: 100%;
+                    margin: 0;
+                    padding: 0 !important;
+                    background: white !important;
+                    color: #1a1a1a !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  @page {
+                    size: A4;
+                    margin: 15mm;
+                  }
+                }
+              `}</style>
+
+              {/* Background Watermark */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-[0.03] select-none z-0">
+                <img 
+                  src={brandSettings?.logo || defaultLogo} 
+                  alt="Watermark" 
+                  className="w-[450px] h-[450px] object-contain"
+                  referrerPolicy="no-referrer"
+                />
               </div>
 
-              {/* Client & Vendor Specs */}
-              <div className="grid grid-cols-2 gap-8 py-6 text-xs">
-                <div>
-                  <p className="font-bold text-emerald-700 uppercase tracking-wider">Invoiced To:</p>
-                  <p className="font-extrabold text-sm text-slate-800 mt-1">{invoiceClient.name}</p>
-                  <p className="font-bold text-slate-700">{invoiceClient.businessName}</p>
-                  <p className="text-slate-500 mt-1.5">{invoiceClient.address || 'Address on file'}</p>
-                  <p className="text-slate-500">Mobile: {invoiceClient.mobile}</p>
-                  {invoiceClient.gstNumber && <p className="text-slate-500 font-mono mt-1">GSTIN: {invoiceClient.gstNumber}</p>}
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-emerald-700 uppercase tracking-wider">Campaign Terms:</p>
-                  <p className="text-slate-600 mt-1">Status: <span className="font-bold uppercase">{invoiceClient.status}</span></p>
-                  <p className="text-slate-600">Start Date: {formatDate(invoiceClient.startDate)}</p>
-                  <p className="text-slate-600">Expiry Date: {formatDate(invoiceClient.expiryDate)}</p>
-                  <p className="text-slate-600">Duration: {invoiceClient.packageDuration}</p>
-                </div>
-              </div>
-
-              {/* Line Item Table */}
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-emerald-50 text-emerald-800 font-bold uppercase border-b border-emerald-100">
-                    <th className="py-2.5 px-3">Description</th>
-                    <th className="py-2.5 px-3 text-right">Term Duration</th>
-                    <th className="py-2.5 px-3 text-right">Base Value (₹)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  <tr>
-                    <td className="py-4 px-3">
-                      <p className="font-bold text-slate-800">
-                        {invoiceClient.packageDetails?.customName || `${invoiceClient.packageDetails?.type || 'Custom'} Marketing Campaign`}
-                      </p>
-                      <ul className="list-disc pl-4 mt-1 text-[11px] text-slate-500 space-y-0.5">
-                        {(invoiceClient.packageDetails?.services || ['Custom Branding Solutions']).map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </td>
-                    <td className="py-4 px-3 text-right font-semibold">{invoiceClient.packageDuration}</td>
-                    <td className="py-4 px-3 text-right font-mono font-bold">
-                      {formatCurrency(invoiceClient.packageDetails?.price || (invoiceClient.revenue + invoiceClient.pendingAmount) || 0)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Total Calculation */}
-              <div className="flex justify-end pt-6 border-t border-slate-200">
-                <div className="w-64 space-y-2 text-xs">
-                  <div className="flex justify-between text-slate-500">
-                    <span>Base Amount:</span>
-                    <span className="font-mono">
-                      {formatCurrency(invoiceClient.packageDetails?.price || (invoiceClient.revenue + invoiceClient.pendingAmount) || 0)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-500">
-                    <span>Paid to Date:</span>
-                    <span className="font-mono text-emerald-600">-{formatCurrency(invoiceClient.revenue || 0)}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-200 pt-2 text-sm font-bold text-slate-800">
-                    <span>Outstanding Due:</span>
-                    <span className="font-mono text-rose-600">{formatCurrency(invoiceClient.pendingAmount || 0)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Receipt / History Section */}
-              {invoiceClient.payments && invoiceClient.payments.length > 0 && (
-                <div className="mt-8 pt-6 border-t border-dashed border-slate-200">
-                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-2">Recorded Payment Ledger History</p>
-                  <div className="space-y-1.5 text-[11px] text-slate-600">
-                    {invoiceClient.payments.map((p, idx) => (
-                      <div key={p.id || idx} className="flex justify-between">
-                        <span>• Received {formatCurrency(p.amount)} via {p.mode} on {formatDate(p.date)}</span>
-                        <span className="font-mono italic">({p.notes})</span>
+              <div className="relative z-10 space-y-8">
+                {/* Header Grid */}
+                <div className="flex flex-col md:flex-row justify-between items-start gap-6 border-b border-slate-100 pb-8">
+                  {/* Brand Profile */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-14 h-14 rounded-xl bg-transparent flex items-center justify-center p-0.5 shrink-0 overflow-hidden border border-slate-100/80">
+                        <img 
+                          src={brandSettings?.logo || defaultLogo} 
+                          alt="AB Graphics" 
+                          className="max-h-full max-w-full object-contain mx-auto"
+                          referrerPolicy="no-referrer"
+                        />
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      <div>
+                        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
+                          AB GRAPHICS
+                        </h2>
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Graphic Designer & Digital Marketer</p>
+                      </div>
+                    </div>
 
-              {/* UPI Payment Scan Section */}
-              <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between gap-6 bg-slate-50 p-5 rounded-2xl print:bg-white print:p-0 print:border-none">
-                <div className="space-y-2 max-w-sm text-left">
-                  <h4 className="text-xs font-extrabold text-emerald-800 uppercase tracking-widest flex items-center gap-1.5">⚡ Instant UPI Payment</h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Scan this QR code from any UPI app (GPay, PhonePe, Paytm, BHIM) to settle your outstanding campaign dues instantly.
-                  </p>
-                  <div className="text-[11px] font-mono text-slate-500 bg-white border border-slate-100 rounded-lg px-3 py-1.5 flex items-center justify-between print:bg-transparent">
-                    <span>UPI ID: 9307643461@axl</span>
+                    <div className="text-xs text-slate-500 space-y-0.5">
+                      <p className="font-semibold text-slate-700">AB Graphics Studio</p>
+                      <p>Mobile: +91 93076 43461</p>
+                      <p>Email: support@abgraphics.co</p>
+                      <p>Website: www.abgraphics.co</p>
+                      <p className="font-mono text-[10px] text-slate-400">GSTIN: 27AABCA1234F1Z5</p>
+                    </div>
                   </div>
-                </div>
-                <div className="shrink-0 flex flex-col items-center gap-1.5">
-                  <div className="w-36 h-48 bg-white border border-slate-200/60 rounded-xl p-2 shadow-sm flex items-center justify-center overflow-hidden">
-                    <img 
-                      src={brandSettings?.qr || defaultQr} 
-                      alt="UPI QR Payment" 
-                      className="max-h-full max-w-full object-contain mx-auto"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">AB Graphics Merchant QR</span>
-                </div>
-              </div>
 
-              {/* Footer Terms */}
-              <div className="mt-12 pt-6 border-t border-slate-100 text-center text-[10px] text-slate-400 leading-relaxed">
-                <p className="font-semibold text-slate-500">Thank you for your business!</p>
-                <p className="mt-1">This is a system generated computer document which represents campaign terms recorded in CRM.</p>
+                  {/* Invoice Meta */}
+                  <div className="md:text-right space-y-3 shrink-0">
+                    <div>
+                      <h1 className="text-2xl font-black uppercase tracking-widest text-slate-800">SERVICE INVOICE</h1>
+                      <p className="text-xs font-mono text-slate-500 mt-0.5">Invoice #: INV-CRM-{Date.now().toString().slice(-6)}</p>
+                    </div>
+
+                    <div className="text-xs text-slate-500 space-y-1">
+                      <p><span className="font-medium text-slate-400">Invoice Date:</span> <span className="font-mono font-semibold text-slate-700">{new Date().toISOString().split('T')[0]}</span></p>
+                      <p><span className="font-medium text-slate-400">Due Date:</span> <span className="font-mono font-semibold text-slate-700">{formatDate(invoiceClient.expiryDate)}</span></p>
+                    </div>
+
+                    {/* Status Badge */}
+                    <div className="pt-1">
+                      {(() => {
+                        const isPaid = (invoiceClient.pendingAmount || 0) <= 0;
+                        const isPartial = (invoiceClient.revenue || 0) > 0 && (invoiceClient.pendingAmount || 0) > 0;
+                        const label = isPaid ? 'PAID' : (isPartial ? 'PARTIAL' : 'UNPAID');
+                        const colorClass = isPaid 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                          : (isPartial ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200');
+
+                        return (
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest border ${colorClass}`}>
+                            {label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Client Specs (Premium Card) */}
+                <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Invoiced To</p>
+                    <p className="font-bold text-base text-slate-900">{invoiceClient.name}</p>
+                    <p className="font-semibold text-slate-700 mt-0.5">{invoiceClient.businessName}</p>
+                    <p className="text-slate-500 mt-2 leading-relaxed">{invoiceClient.address || 'Address on file'}</p>
+                    <p className="text-slate-500 mt-1">Mobile: {invoiceClient.mobile}</p>
+                    {invoiceClient.gstNumber && (
+                      <p className="text-slate-400 font-mono mt-1.5 text-[11px]">GSTIN: {invoiceClient.gstNumber}</p>
+                    )}
+                  </div>
+
+                  <div className="md:border-l md:border-slate-200/60 md:pl-6 space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Campaign Details</p>
+                    <p><span className="text-slate-400">Package Name:</span> <span className="font-semibold text-slate-700">{invoiceClient.packageDetails?.customName || invoiceClient.packageDetails?.type || 'Custom Package'}</span></p>
+                    <p><span className="text-slate-400">Package Duration:</span> <span className="font-semibold text-slate-700">{invoiceClient.packageDuration}</span></p>
+                    <p><span className="text-slate-400">Start Date:</span> <span className="font-mono text-slate-600">{formatDate(invoiceClient.startDate)}</span></p>
+                    <p><span className="text-slate-400">Expiry Date:</span> <span className="font-mono text-slate-600">{formatDate(invoiceClient.expiryDate)}</span></p>
+                  </div>
+                </div>
+
+                {/* Line Item Table */}
+                <div className="overflow-hidden border border-slate-100 rounded-2xl">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-100">
+                        <th className="py-3 px-4">Service & Description</th>
+                        <th className="py-3 px-4 text-center">Quantity</th>
+                        <th className="py-3 px-4 text-center">Duration</th>
+                        <th className="py-3 px-4 text-right">Price (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      <tr className="bg-white hover:bg-slate-50/20">
+                        <td className="py-5 px-4 max-w-sm">
+                          <p className="font-bold text-slate-950">
+                            {invoiceClient.packageDetails?.customName || `${invoiceClient.packageDetails?.type || 'Custom'} Marketing Campaign`}
+                          </p>
+                          <ul className="list-disc pl-4 mt-2 text-[11px] text-slate-500 space-y-1">
+                            {(invoiceClient.packageDetails?.services || ['Custom Branding Solutions']).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td className="py-5 px-4 text-center font-semibold text-slate-600">1</td>
+                        <td className="py-5 px-4 text-center font-semibold text-slate-600">{invoiceClient.packageDuration}</td>
+                        <td className="py-5 px-4 text-right font-mono font-bold text-slate-900">
+                          {formatCurrency(invoiceClient.packageDetails?.price || (invoiceClient.revenue + invoiceClient.pendingAmount) || 0)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary & UPI QR Section */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+                  {/* UPI Payment Scan Box */}
+                  <div className="border border-slate-150 border-slate-200/60 rounded-2xl p-5 flex items-center justify-between gap-4 bg-slate-50/30">
+                    <div className="space-y-2 text-left">
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Scan to Pay</h4>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Scan from any UPI application (GPay, PhonePe, Paytm, BHIM) to settle due balances instantly.
+                      </p>
+                      <div className="text-[10px] font-mono text-slate-600 bg-white border border-slate-100 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
+                        <span>UPI: 9307643461@axl</span>
+                      </div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">UPI Payment</p>
+                    </div>
+                    <div className="shrink-0 flex flex-col items-center gap-1">
+                      <div className="w-24 h-32 bg-white border border-slate-200/60 rounded-xl p-1.5 shadow-sm flex items-center justify-center overflow-hidden">
+                        <img 
+                          src={brandSettings?.qr || defaultQr} 
+                          alt="UPI QR" 
+                          className="max-h-full max-w-full object-contain mx-auto"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Summary */}
+                  <div className="bg-slate-50/30 border border-slate-200/60 rounded-2xl p-5 space-y-2.5 text-xs">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest pb-1 border-b border-slate-200/40">Payment Summary</h4>
+                    
+                    <div className="flex justify-between text-slate-500">
+                      <span>Package Value:</span>
+                      <span className="font-mono">
+                        {formatCurrency(invoiceClient.packageDetails?.price || (invoiceClient.revenue + invoiceClient.pendingAmount) || 0)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span>Discount:</span>
+                      <span className="font-mono text-slate-400">₹0</span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500">
+                      <span>Tax (GST 0%):</span>
+                      <span className="font-mono text-slate-400">₹0</span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-600 border-t border-slate-200/40 pt-2 font-medium">
+                      <span>Final Total:</span>
+                      <span className="font-mono">
+                        {formatCurrency(invoiceClient.packageDetails?.price || (invoiceClient.revenue + invoiceClient.pendingAmount) || 0)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-emerald-600 font-bold">
+                      <span>Amount Paid:</span>
+                      <span className="font-mono">-{formatCurrency(invoiceClient.revenue || 0)}</span>
+                    </div>
+
+                    <div className="flex justify-between border-t border-slate-200 pt-2.5 text-sm font-black">
+                      <span className="text-slate-800">Outstanding:</span>
+                      <span className={`font-mono ${(invoiceClient.pendingAmount || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {formatCurrency(invoiceClient.pendingAmount || 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment History Log */}
+                {invoiceClient.payments && invoiceClient.payments.length > 0 && (
+                  <div className="pt-6 border-t border-dashed border-slate-200">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Recorded Payment Ledger History</p>
+                    <div className="space-y-1.5 text-[11px] text-slate-600">
+                      {invoiceClient.payments.map((p, idx) => (
+                        <div key={p.id || idx} className="flex justify-between bg-slate-50/40 px-3 py-1.5 rounded-lg border border-slate-100">
+                          <span>• Received {formatCurrency(p.amount)} via {p.mode} on {formatDate(p.date)}</span>
+                          <span className="font-mono text-slate-400 italic">({p.notes})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Terms and Conditions (Exactly 10 Points in 2 Columns) */}
+                <div className="border-t border-slate-100 pt-6">
+                  <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-3">Terms & Conditions</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 text-[9px] text-slate-400 leading-relaxed">
+                    <div>1. 50% advance payment is mandatory.</div>
+                    <div>2. Remaining payment before final delivery.</div>
+                    <div>3. Reel production timelines may vary depending on shoot schedule and revisions.</div>
+                    <div>4. Meta Ads and Digital Marketing results depend on audience, competition and advertising budget.</div>
+                    <div>5. AB Graphics provides professional marketing services only.</div>
+                    <div>6. We do not guarantee any fixed number of leads, admissions, sales or revenue.</div>
+                    <div>7. Client delays in approvals may affect delivery timelines.</div>
+                    <div>8. Two minor revisions are included unless otherwise agreed.</div>
+                    <div>9. Advertisement budget is separate unless mentioned in package.</div>
+                    <div>10. By making payment the client accepts all terms.</div>
+                  </div>
+                </div>
+
+                {/* Thank You & Powered By Footer */}
+                <div className="text-center text-[10px] text-slate-400 pt-6 border-t border-slate-100">
+                  <p className="font-bold text-slate-600">Thank you for choosing AB Graphics.</p>
+                  <p className="mt-0.5">We appreciate your trust.</p>
+                  <p className="text-[8px] uppercase tracking-widest text-slate-300 mt-3">Powered by AB Graphics CRM</p>
+                </div>
               </div>
             </div>
           </motion.div>
