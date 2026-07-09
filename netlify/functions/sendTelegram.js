@@ -142,7 +142,7 @@ const formatTelegramMessage = (eventType, data, messageText) => {
   return messageText || 'Notification from AB Graphics CRM';
 };
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
