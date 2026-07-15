@@ -30,8 +30,57 @@ export const TelegramSettings: React.FC = () => {
     sendTelegramNotification
   } = useCRM();
 
-  // Active sub-tab state: 'brand' or 'telegram'
-  const [activeSubTab, setActiveSubTab] = useState<'brand' | 'telegram'>('brand');
+  // Active sub-tab state: 'brand' or 'telegram' or 'install'
+  const [activeSubTab, setActiveSubTab] = useState<'brand' | 'telegram' | 'install'>('brand');
+
+  // PWA installation states
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [installSuccess, setInstallSuccess] = useState(false);
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandalone = 
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true;
+      setIsInstalled(isStandalone);
+    };
+    checkStandalone();
+
+    const handleBeforePrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setInstallSuccess(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforePrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforePrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try {
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setInstallSuccess(true);
+        setIsInstalled(true);
+        setDeferredPrompt(null);
+      }
+    } catch (err) {
+      console.error("Installation choice prompt failed:", err);
+    }
+  };
 
   // Telegram state variables
   const [botToken, setBotToken] = useState('');
@@ -274,7 +323,7 @@ export const TelegramSettings: React.FC = () => {
       </div>
 
       {/* Tab Switcher */}
-      <div className="flex border-b border-emerald-900/10 gap-1">
+      <div className="flex border-b border-emerald-900/10 gap-1 flex-wrap">
         <button
           onClick={() => setActiveSubTab('brand')}
           className={`px-4 py-2.5 text-xs font-semibold rounded-t-xl transition-all relative flex items-center gap-2 cursor-pointer ${
@@ -297,6 +346,18 @@ export const TelegramSettings: React.FC = () => {
           <Send className="h-4 w-4" />
           <span>Telegram Notifications</span>
         </button>
+        {(!isInstalled || installSuccess) && (
+          <button
+            onClick={() => setActiveSubTab('install')}
+            className={`px-4 py-2.5 text-xs font-semibold rounded-t-xl transition-all relative flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'install' 
+                ? 'text-emerald-400 bg-emerald-500/5 font-bold border-b-2 border-emerald-500' 
+                : 'text-gray-400 hover:text-white hover:bg-white/2'
+            }`}
+          >
+            <span>📲 Install AB Graphics CRM</span>
+          </button>
+        )}
       </div>
 
       {/* TAB CONTENT: BRAND ASSETS */}
@@ -615,6 +676,66 @@ export const TelegramSettings: React.FC = () => {
             </div>
 
           </form>
+        </motion.div>
+      )}
+
+      {/* TAB CONTENT: PWA INSTALLATION */}
+      {activeSubTab === 'install' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[#141414] border border-emerald-900/10 rounded-2xl p-6 space-y-6 max-w-2xl mx-auto"
+        >
+          <div className="flex items-center gap-3 border-b border-emerald-900/10 pb-4">
+            <span className="text-2xl">📲</span>
+            <div>
+              <h3 className="text-base font-bold text-white">Install AB Graphics CRM</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Enjoy a lightweight, lightning-fast native app experience directly on your Home Screen.</p>
+            </div>
+          </div>
+
+          {installSuccess ? (
+            <div className="flex items-center gap-2.5 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-sm font-semibold">
+              <Check className="h-5 w-5 shrink-0" />
+              <span>✅ AB Graphics CRM Installed Successfully.</span>
+            </div>
+          ) : isInstalled ? (
+            <div className="flex items-center gap-2.5 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-sm font-semibold">
+              <Check className="h-5 w-5 shrink-0" />
+              <span>✅ App Already Installed</span>
+            </div>
+          ) : deferredPrompt ? (
+            <div className="space-y-4">
+              <div className="text-xs text-gray-400 leading-relaxed space-y-2">
+                <p>AB Graphics CRM is fully optimized as a modern Progressive Web App (PWA):</p>
+                <ul className="list-disc list-inside space-y-1.5 text-gray-300">
+                  <li>Launches instantly in a clean, immersive screen without browser headers</li>
+                  <li>Saves local database and offline configurations dynamically</li>
+                  <li>Maintains crisp, high-resolution original brand icons in system app rails</li>
+                </ul>
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-emerald-500/10 transition-all flex items-center gap-2"
+              >
+                <span>📲 Install AB Graphics CRM</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-4 bg-[#0d0d0d] rounded-xl border border-emerald-900/5">
+                <p className="text-xs text-emerald-400 font-semibold mb-1">PWA Install Information</p>
+                <p className="text-xs text-gray-300">
+                  Open your browser menu and tap <span className="font-semibold text-white">Add to Home Screen</span>.
+                </p>
+              </div>
+              <div className="text-[11px] text-gray-500 leading-relaxed">
+                Note: On iOS/iPadOS, tap the Safari Share icon (<span className="font-mono text-white text-xs">↑</span>), scroll down, and select <span className="text-emerald-400 font-bold">"Add to Home Screen"</span>.
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 
