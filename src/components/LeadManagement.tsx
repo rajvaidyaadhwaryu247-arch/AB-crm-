@@ -133,6 +133,7 @@ export const LeadManagement: React.FC = () => {
 
   // Expanded Lead Form Fields
   const [email, setEmail] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [website, setWebsite] = useState('');
   const [googleMapsLink, setGoogleMapsLink] = useState('');
   const [address, setAddress] = useState('');
@@ -170,7 +171,7 @@ export const LeadManagement: React.FC = () => {
   const [cImagePreview, setCImagePreview] = useState<string>('');
 
   // Conversion Package & Services States
-  const [cPackageType, setCPackageType] = useState<'Basic' | 'Advance' | 'Pro' | 'Custom'>('Basic');
+  const [cPackageType, setCPackageType] = useState<'Basic' | 'Advance' | 'Pro' | 'Custom' | 'Quick Service'>('Basic');
   const [cCustomPackageName, setCCustomPackageName] = useState('');
   const [cPackagePrice, setCPackagePrice] = useState(10000);
   const [cSelectedServices, setCSelectedServices] = useState<string[]>([]);
@@ -302,8 +303,8 @@ export const LeadManagement: React.FC = () => {
     setCImagePreview('');
 
     // Pre-populate package selection based on lead's expectation if matching
-    if (lead.expectedPackage === 'Basic' || lead.expectedPackage === 'Advance' || lead.expectedPackage === 'Pro') {
-      handleCPackageTypeChange(lead.expectedPackage);
+    if (lead.expectedPackage === 'Basic' || lead.expectedPackage === 'Advance' || lead.expectedPackage === 'Pro' || lead.expectedPackage === 'Quick Service') {
+      handleCPackageTypeChange(lead.expectedPackage as any);
     } else {
       // Default package details for basic package
       setCPackageType('Basic');
@@ -331,7 +332,7 @@ export const LeadManagement: React.FC = () => {
   };
 
   // Helper to sync defaults when converting package changes
-  const handleCPackageTypeChange = (type: 'Basic' | 'Advance' | 'Pro' | 'Custom') => {
+  const handleCPackageTypeChange = (type: 'Basic' | 'Advance' | 'Pro' | 'Custom' | 'Quick Service') => {
     setCPackageType(type);
     if (type === 'Basic') {
       setCPackagePrice(10000);
@@ -369,6 +370,11 @@ export const LeadManagement: React.FC = () => {
         'WhatsApp Automation',
         'Website Development'
       ]);
+    } else if (type === 'Quick Service') {
+      setCCustomPackageName('1 Reel');
+      setCPackagePrice(1500);
+      setCPackageDuration('One-Time');
+      setCSelectedServices(['Reel Editing']);
     } else {
       setCCustomPackageName('');
       setCPackagePrice(0);
@@ -380,6 +386,8 @@ export const LeadManagement: React.FC = () => {
   // Submit Lead Add/Edit
   const handleLeadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     try {
       const leadData = {
         name,
@@ -451,6 +459,8 @@ tel:${savedLead.mobile}`;
     } catch (err) {
       console.error(err);
       showToast("❌ Failed to save lead", "error");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -481,8 +491,9 @@ tel:${savedLead.mobile}`;
   // Submit Client Conversion
   const handleConversionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!convertingLead) return;
+    if (!convertingLead || isSaving) return;
 
+    setIsSaving(true);
     try {
       const currentPayments: Payment[] = [];
       if (cInitialPaymentAmount > 0) {
@@ -519,7 +530,7 @@ tel:${savedLead.mobile}`;
         profilePhoto: cImagePreview || '',
         packageDetails: {
           type: cPackageType,
-          customName: cPackageType === 'Custom' ? cCustomPackageName || 'Custom Package' : `${cPackageType} Package`,
+          customName: (cPackageType === 'Custom' || cPackageType === 'Quick Service') ? cCustomPackageName || `${cPackageType} Work` : `${cPackageType} Package`,
           price: finalPkgPrice,
           duration: cPackageDuration,
           services: cSelectedServices
@@ -538,7 +549,7 @@ tel:${savedLead.mobile}`;
 👤 Name: ${cName}
 🏢 Business: ${cBusinessName}
 📞 Phone: ${cMobile}
-📦 Package Details: ${cPackageType === 'Custom' ? cCustomPackageName : cPackageType + ' Package'}
+📦 Package Details: ${(cPackageType === 'Custom' || cPackageType === 'Quick Service') ? cCustomPackageName : cPackageType + ' Package'}
 💰 Deal Value: ₹${finalPkgPrice}
 💵 Received Amount: ₹${totalReceived}
 📅 Campaign Starts: ${cStartDate}
@@ -556,6 +567,8 @@ tel:${savedLead.mobile}`;
     } catch (err) {
       console.error(err);
       showToast("Failed to convert lead: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -615,6 +628,9 @@ tel:${savedLead.mobile}`;
     'Proposal / Quotation Sent',
     'In Progress',
     'Interested',
+    'Needs Time',
+    'Follow-up Required',
+    'Not Interested',
     'Negotiation',
     'Waiting For Client Decision',
     'Payment Pending',
@@ -662,14 +678,14 @@ tel:${savedLead.mobile}`;
     expectedTotalRevenue
   } = useMemo(() => {
     const total = leads.length;
-    const active = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost').length;
+    const active = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost' && l.status !== 'Not Interested').length;
     const converted = leads.filter(l => l.status === 'Converted').length;
-    const lost = leads.filter(l => l.status === 'Lost').length;
+    const lost = leads.filter(l => l.status === 'Lost' || l.status === 'Not Interested').length;
     const rate = total > 0 ? ((converted / total) * 100).toFixed(0) : '0';
-    const hot = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost' && (l.leadScore || 0) >= 50).length;
-    const atRisk = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost' && l.health === 'At Risk').length;
+    const hot = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost' && l.status !== 'Not Interested' && (l.leadScore || 0) >= 50).length;
+    const atRisk = leads.filter(l => l.status !== 'Converted' && l.status !== 'Lost' && l.status !== 'Not Interested' && l.health === 'At Risk').length;
     const expectedRev = leads
-      .filter(l => l.status !== 'Converted' && l.status !== 'Lost')
+      .filter(l => l.status !== 'Converted' && l.status !== 'Lost' && l.status !== 'Not Interested')
       .reduce((sum, l) => sum + (l.expectedRevenue || 0), 0);
     return {
       totalLeadsCount: total,
@@ -700,6 +716,12 @@ tel:${savedLead.mobile}`;
         return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
       case 'Interested':
         return 'bg-violet-500/10 text-violet-400 border-violet-500/20';
+      case 'Needs Time':
+        return 'bg-amber-600/15 text-amber-400 border-amber-500/30';
+      case 'Follow-up Required':
+        return 'bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/30';
+      case 'Not Interested':
+        return 'bg-rose-950/20 text-rose-400 border-rose-500/20';
       case 'Negotiation':
         return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
       case 'Waiting For Client Decision':
@@ -1075,6 +1097,33 @@ tel:${savedLead.mobile}`;
                         <span>{formatDate(lead.lastContactDate)}</span>
                       </div>
                     )}
+                  </div>
+
+                  {/* CRM Stage Dropdown Selector */}
+                  <div className="flex items-center justify-between bg-[#0a0a0a] border border-slate-850 px-3 py-1.5 rounded-xl text-xs mt-3">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">CRM Stage:</span>
+                    <select
+                      value={lead.status}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value as any;
+                        let notesVal = `Changed stage to ${newStatus}`;
+                        if (newStatus === 'Lost' || newStatus === 'Not Interested') {
+                          const reason = window.prompt(`Enter reason for marking lead as ${newStatus}:`);
+                          if (reason !== null) {
+                            notesVal = `Stage changed to ${newStatus}. Reason: ${reason}`;
+                          } else {
+                            return; // cancel status change
+                          }
+                        }
+                        await updateLead(lead.id, { status: newStatus }, 'Status Update', notesVal);
+                        showToast(`✅ Status updated to ${newStatus}`);
+                      }}
+                      className="bg-transparent border-0 text-emerald-400 font-black focus:outline-none cursor-pointer text-xs"
+                    >
+                      {PIPELINE_STAGES.map(s => (
+                        <option key={s} value={s} className="bg-[#141414] text-white font-medium">{s}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -1561,6 +1610,7 @@ tel:${savedLead.mobile}`;
                         <option value="Basic">Basic Package (₹10,000/M)</option>
                         <option value="Advance">Advance Package (₹25,000/M)</option>
                         <option value="Pro">Pro Package (₹50,000/M)</option>
+                        <option value="Quick Service">⚡ Quick Service (One-Time Work)</option>
                         <option value="Custom">Custom Scope</option>
                       </select>
                     </div>
@@ -1656,9 +1706,10 @@ tel:${savedLead.mobile}`;
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-md"
+                    disabled={isSaving}
+                    className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {editingLead ? 'Save Updates' : 'Publish Prospect Lead'}
+                    {isSaving ? 'Publishing...' : (editingLead ? 'Save Updates' : 'Publish Prospect Lead')}
                   </button>
                 </div>
               </form>
@@ -1989,10 +2040,9 @@ tel:${savedLead.mobile}`;
                 {/* Extra Info mapping */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-gray-400">Client Email Address <span className="text-emerald-400">*</span></label>
+                    <label className="block text-xs font-medium text-gray-400">Client Email Address (Optional)</label>
                     <input
                       type="email"
-                      required
                       value={cEmail}
                       onChange={(e) => setCEmail(e.target.value)}
                       placeholder="Enter email for receipts & reports"
@@ -2041,6 +2091,7 @@ tel:${savedLead.mobile}`;
                       onChange={(e) => setCPackageDuration(e.target.value)}
                       className="mt-1 block w-full bg-[#0d0d0d] border border-slate-850 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
                     >
+                      <option value="One-Time">One-Time Project</option>
                       <option value="1 Month">1 Month Campaign</option>
                       <option value="3 Months">3 Months Campaign</option>
                       <option value="6 Months">6 Months Campaign</option>
@@ -2079,6 +2130,7 @@ tel:${savedLead.mobile}`;
                         <option value="Basic">Basic Package (₹10,000/M)</option>
                         <option value="Advance">Advance Package (₹25,000/M)</option>
                         <option value="Pro">Pro Package (₹50,000/M)</option>
+                        <option value="Quick Service">⚡ Quick Service (One-Time)</option>
                         <option value="Custom">Custom Scope</option>
                       </select>
                     </div>
@@ -2095,6 +2147,55 @@ tel:${savedLead.mobile}`;
                       />
                     </div>
                   </div>
+
+                  {cPackageType === 'Quick Service' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-3 p-4 bg-slate-900/40 rounded-xl border border-slate-800"
+                    >
+                      <div>
+                        <label className="block text-xs font-medium text-emerald-400">Quick Service Work Scope / Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={cCustomPackageName}
+                          onChange={(e) => setCCustomPackageName(e.target.value)}
+                          placeholder="e.g. 1 Reel, Poster, Logo"
+                          className="mt-1 block w-full bg-[#141414] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Select a Quick Service Preset:</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { name: '1 Reel', price: 1500, service: 'Reel Editing' },
+                            { name: 'Poster', price: 500, service: 'Poster Design' },
+                            { name: 'Banner', price: 1000, service: 'Banner Design' },
+                            { name: 'Logo', price: 2500, service: 'Logo Design' },
+                            { name: 'Visiting Card', price: 600, service: 'Visiting Card Design' },
+                          ].map(preset => (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => {
+                                setCCustomPackageName(preset.name);
+                                setCPackagePrice(preset.price);
+                                setCSelectedServices([preset.service]);
+                              }}
+                              className={`text-xs px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                                cCustomPackageName === preset.name
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
+                                  : 'bg-[#141414] text-gray-300 border-slate-850 hover:border-slate-750'
+                              }`}
+                            >
+                              {preset.name} (₹{preset.price})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
 
                   {cPackageType === 'Custom' && (
                     <motion.div
@@ -2227,9 +2328,10 @@ tel:${savedLead.mobile}`;
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-500/10 cursor-pointer flex items-center gap-1.5 transition-colors"
+                    disabled={isSaving}
+                    className="px-6 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-500/10 cursor-pointer flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Confirm Convert <UserPlus className="h-4 w-4" />
+                    {isSaving ? 'Converting...' : 'Confirm Convert'} <UserPlus className="h-4 w-4" />
                   </button>
                 </div>
 

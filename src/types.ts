@@ -8,7 +8,7 @@ export interface Payment {
 }
 
 export interface ClientPackage {
-  type: 'Basic' | 'Advance' | 'Pro' | 'Custom';
+  type: 'Basic' | 'Advance' | 'Pro' | 'Custom' | 'Quick Service';
   customName?: string; // For Custom Package
   price: number; // Total package value
   duration: string; // e.g. "1 Month", "3 Months", "6 Months", "1 Year", "Custom"
@@ -49,6 +49,7 @@ export interface ContentPlanner {
     strategyTitle: string;
     highLevelStrategy: string;
     keyMetrics: string;
+    weeklyThemes?: string[];
   };
 }
 
@@ -75,6 +76,7 @@ export interface Client {
   packageDetails?: ClientPackage;
   payments?: Payment[];
   contentPlanner?: ContentPlanner;
+  leadId?: string;
 }
 
 export interface LeadTimelineItem {
@@ -95,7 +97,7 @@ export interface Lead {
   mobile: string;
   leadSource: string; // e.g. Facebook, Instagram, Google, Website, Reference, Direct, Other
   followUpDate: string; // YYYY-MM-DD
-  status: 'New' | 'Contacted' | 'Meeting Scheduled' | 'Meeting Done' | 'Proposal / Quotation Sent' | 'In Progress' | 'Interested' | 'Negotiation' | 'Waiting For Client Decision' | 'Payment Pending' | 'Converted' | 'Lost';
+  status: 'New' | 'Contacted' | 'Meeting Scheduled' | 'Meeting Done' | 'Proposal / Quotation Sent' | 'In Progress' | 'Interested' | 'Negotiation' | 'Waiting For Client Decision' | 'Payment Pending' | 'Converted' | 'Lost' | 'Needs Time' | 'Follow-up Required' | 'Not Interested';
   notes: string;
   createdBy: string;
   createdAt: string;

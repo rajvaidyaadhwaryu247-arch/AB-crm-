@@ -9,6 +9,8 @@ export function calculateExpiryDate(startDateStr: string, duration: string): str
   if (isNaN(date.getTime())) return '';
 
   switch (duration) {
+    case 'One-Time':
+      return startDateStr;
     case '1 Month':
       date.setMonth(date.getMonth() + 1);
       break;
@@ -115,8 +117,8 @@ export function calculateLeadScoreAndHealth(
   if (lead.status === 'Converted') {
     return { score: 100, label: 'Ready To Close', health: 'Healthy' };
   }
-  // Lost is 0
-  if (lead.status === 'Lost') {
+  // Lost or Not Interested is 0
+  if (lead.status === 'Lost' || lead.status === 'Not Interested') {
     return { score: 0, label: 'Cold', health: 'At Risk' };
   }
 

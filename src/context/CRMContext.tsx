@@ -54,7 +54,7 @@ interface CRMContextType {
     notes?: string,
     leadId?: string,
     leadName?: string,
-    assignedTo?: Task['assignedTo'],
+    assignedTo?: Task['assignedTo'] | 'auto' | null,
     priority?: Task['priority'],
     plannerActivityId?: string
   ) => Promise<void>;
@@ -68,6 +68,7 @@ interface CRMContextType {
   updateTelegramSettings: (settings: TelegramSettings) => Promise<void>;
   updateBrandSettings: (settings: Partial<BrandSettings>) => Promise<void>;
   sendTelegramNotification: (messageText: string, eventType?: string, data?: any, customBotToken?: string, customChatId?: string) => Promise<void>;
+  sendTodayWorkSummary?: () => Promise<void>;
   stats: DashboardStats;
 }
 
@@ -117,6 +118,126 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+export function getAutoAssignee(
+  title: string,
+  type?: string,
+  notes?: string,
+  hasPlanner?: boolean,
+  hasLead?: boolean,
+  hasClient?: boolean
+): 'Bhargav' | 'Adhwaryu' | 'Pari' {
+  const tLower = title.toLowerCase();
+  const typeLower = (type || '').toLowerCase();
+  const notesLower = (notes || '').toLowerCase();
+  const text = `${tLower} ${typeLower} ${notesLower}`;
+
+  // 1. Pari (Administration)
+  if (
+    text.includes('excel') ||
+    text.includes('data entry') ||
+    text.includes('client records') ||
+    text.includes('lead records') ||
+    text.includes('package records') ||
+    text.includes('pending payment records') ||
+    text.includes('payment records') ||
+    text.includes('records') ||
+    text.includes('reports') ||
+    text.includes('report') ||
+    text.includes('reminder') ||
+    text.includes('verification') ||
+    text.includes('documentation')
+  ) {
+    return 'Pari';
+  }
+
+  // 2. Bhargav (Creative)
+  if (
+    text.includes('reel shoot') ||
+    text.includes('reel editing') ||
+    text.includes('video editing') ||
+    text.includes('reel') ||
+    text.includes('creative') ||
+    text.includes('design') ||
+    text.includes('poster') ||
+    text.includes('banner') ||
+    text.includes('visiting card') ||
+    text.includes('logo') ||
+    text.includes('branding') ||
+    text.includes('story design') ||
+    text.includes('instagram post') ||
+    text.includes('facebook post') ||
+    text.includes('carousel') ||
+    text.includes('website') ||
+    text.includes('meta ads') ||
+    text.includes('google ads') ||
+    text.includes('media') ||
+    text.includes('shoot') ||
+    text.includes('editing') ||
+    text.includes('graphic') ||
+    text.includes('photo edit') ||
+    text.includes('photo editing') ||
+    text.includes('video edit') ||
+    text.includes('story upload') ||
+    typeLower.includes('shoot') ||
+    typeLower.includes('editing') ||
+    typeLower.includes('poster') ||
+    typeLower.includes('website') ||
+    typeLower.includes('printing')
+  ) {
+    return 'Bhargav';
+  }
+
+  // 3. Adhwaryu (Operations)
+  if (
+    text.includes('new lead') ||
+    text.includes('lead follow-up') ||
+    text.includes('lead followup') ||
+    text.includes('lead follow') ||
+    text.includes('lead conversion') ||
+    text.includes('client meeting') ||
+    text.includes('client call') ||
+    text.includes('payment recovery') ||
+    text.includes('package discussion') ||
+    text.includes('package') ||
+    text.includes('client management') ||
+    text.includes('client') ||
+    text.includes('content planner') ||
+    text.includes('crm update') ||
+    text.includes('crm') ||
+    text.includes('follow-up') ||
+    text.includes('followup') ||
+    text.includes('schedule') ||
+    text.includes('meeting') ||
+    text.includes('operations') ||
+    text.includes('call') ||
+    text.includes('lead')
+  ) {
+    return 'Adhwaryu';
+  }
+
+  // Fallbacks by source module or properties
+  if (hasPlanner) {
+    return 'Bhargav';
+  }
+  if (hasLead || hasClient) {
+    return 'Adhwaryu';
+  }
+
+  // Final smart structural defaults by type
+  if (
+    typeLower.includes('shoot') || 
+    typeLower.includes('editing') || 
+    typeLower.includes('poster') ||
+    typeLower.includes('website') ||
+    typeLower.includes('ads') ||
+    typeLower.includes('printing')
+  ) {
+    return 'Bhargav';
+  }
+
+  return 'Adhwaryu';
+}
+
 export const useCRM = () => {
   const context = useContext(CRMContext);
   if (!context) {
@@ -144,6 +265,44 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [currentUser, setCurrentUser] = useState<CRMUser>(teamMembers[0]);
+
+  const hasScannedTasksRef = useRef(false);
+
+  useEffect(() => {
+    if (!loading.tasks && tasks.length > 0 && !hasScannedTasksRef.current) {
+      hasScannedTasksRef.current = true;
+      
+      const scanAndAssignTasks = async () => {
+        const unassignedTasks = tasks.filter(task => !task.assignedTo || task.assignedTo === 'Unassigned' as any || (task.assignedTo as any) === '');
+        if (unassignedTasks.length === 0) return;
+
+        console.log(`Smart Auto-Assignment Engine: Found ${unassignedTasks.length} unassigned tasks. Auto-assigning...`);
+        
+        for (const task of unassignedTasks) {
+          const correctAssignee = getAutoAssignee(
+            task.title,
+            task.type,
+            task.notes,
+            !!task.plannerActivityId,
+            !!task.leadId || !!task.leadName,
+            !!task.clientId || !!task.clientName
+          );
+
+          try {
+            const taskRef = doc(db, 'tasks', task.id);
+            await updateDoc(taskRef, {
+              assignedTo: correctAssignee
+            });
+            console.log(`Auto-assigned task "${task.title}" to ${correctAssignee}`);
+          } catch (err) {
+            console.error(`Failed to auto-assign task "${task.title}":`, err);
+          }
+        }
+      };
+
+      scanAndAssignTasks();
+    }
+  }, [loading.tasks, tasks]);
 
   // Set up Firestore real-time listeners for single-user environment (all docs loaded without auth gates)
   useEffect(() => {
@@ -464,7 +623,90 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     await logActivity('client_added', `Added new client: ${clientData.name} (${clientData.businessName})`, docRef.id);
-    await sendTelegramNotification("", "client_created", { ...newClientDoc, id: docRef.id });
+
+    // If it is a Quick Service, create exactly one linked task in Team Workspace with auto assignment
+    if (clientData.packageDetails?.type === 'Quick Service') {
+      const serviceName = clientData.packageDetails.customName || 'Quick Service';
+      const taskTitle = `${serviceName} (${clientData.businessName || clientData.name})`;
+      
+      const sNameLower = serviceName.toLowerCase();
+      const notesLower = (clientData.notes || '').toLowerCase();
+      const combinedText = `${sNameLower} ${notesLower}`;
+
+      let taskType: Task['type'] = 'Editing';
+      if (combinedText.includes('shoot')) {
+        taskType = 'Shoot';
+      } else if (
+        combinedText.includes('poster') ||
+        combinedText.includes('design') ||
+        combinedText.includes('logo') ||
+        combinedText.includes('banner') ||
+        combinedText.includes('visiting card') ||
+        combinedText.includes('branding') ||
+        combinedText.includes('carousel') ||
+        combinedText.includes('graphic')
+      ) {
+        taskType = 'Poster';
+      } else if (combinedText.includes('ads') || combinedText.includes('google') || combinedText.includes('meta')) {
+        taskType = 'Ads';
+      } else if (combinedText.includes('website')) {
+        taskType = 'Website';
+      } else if (combinedText.includes('print')) {
+        taskType = 'Printing';
+      }
+
+      // Determine correct assignee based on assignment rules
+      const autoAssignedTo = getAutoAssignee(
+        taskTitle,
+        taskType,
+        clientData.notes,
+        false,
+        false,
+        true
+      ) || 'Bhargav';
+
+      const newTask = {
+        title: taskTitle,
+        dueDate: clientData.expiryDate || clientData.startDate,
+        completed: false,
+        status: 'Pending' as Task['status'],
+        type: taskType,
+        clientId: docRef.id,
+        clientName: clientData.name,
+        assignedTo: autoAssignedTo,
+        priority: 'Medium' as Task['priority'],
+        notes: clientData.notes || '',
+        createdBy: currentUser.uid,
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        await addDoc(collection(db, 'tasks'), sanitizeForFirestore(newTask));
+        await logActivity('task_added', `Created linked task: "${taskTitle}" (${taskType}) assigned to ${autoAssignedTo} for Quick Service customer ${clientData.name}`);
+        
+        // Send a beautiful custom Telegram notification with all required fields
+        const price = clientData.packageDetails.price;
+        const paid = clientData.revenue;
+        const pending = clientData.pendingAmount;
+        
+        const tgMessage = `⚡ *NEW QUICK SERVICE CREATED* ⚡\n\n` +
+          `👤 *Customer:* ${clientData.name} (${clientData.businessName})\n` +
+          `📦 *Service:* ${serviceName}\n` +
+          `👤 *Assigned To:* ${autoAssignedTo}\n` +
+          `💰 *Amount:* ₹${price}\n` +
+          `💵 *Paid:* ₹${paid}\n` +
+          `💳 *Pending:* ₹${pending}\n` +
+          `📅 *Due Date:* ${newTask.dueDate}\n` +
+          `📝 *Notes:* ${clientData.notes || 'None'}`;
+          
+        await sendTelegramNotification(tgMessage, "custom");
+      } catch (taskErr) {
+        console.error("Failed to add linked Quick Service task:", taskErr);
+      }
+    } else {
+      // Standard client creation notification
+      await sendTelegramNotification("", "client_created", { ...newClientDoc, id: docRef.id });
+    }
   };
 
   const updateClient = async (id: string, clientData: Partial<Client>, imageFile?: File | null) => {
@@ -505,9 +747,143 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Detect Conversion from Quick Service to standard Campaign Client
+    const isConvertingFromQuickService = 
+      existingClient?.packageDetails?.type === 'Quick Service' && 
+      updatedData.packageDetails?.type !== 'Quick Service' && 
+      updatedData.packageDetails?.type !== undefined;
+
     const docRef = doc(db, 'clients', id);
     try {
       await updateDoc(docRef, sanitizeForFirestore(updatedData));
+
+      if (isConvertingFromQuickService) {
+        // Log client conversion activity
+        const newPkgType = updatedData.packageDetails?.type || 'Custom';
+        await logActivity('lead_converted', `Converted Quick Service customer "${existingClient.name}" into an official Campaign Client with package: ${newPkgType}`, id);
+
+        // Send a custom Telegram notification for the conversion
+        const price = updatedData.packageDetails?.price || 0;
+        const startDate = updatedData.startDate || existingClient?.startDate || 'N/A';
+        const expiryDate = updatedData.expiryDate || existingClient?.expiryDate || 'N/A';
+
+        const tgConvMessage = `🔄 *QUICK SERVICE CUSTOMER CONVERTED TO CLIENT* 🔄\n\n` +
+          `👤 *Customer:* ${existingClient.name}\n` +
+          `🏢 *Business:* ${existingClient.businessName}\n` +
+          `📦 *New Package:* ${newPkgType}\n` +
+          `💰 *Package Price:* ₹${price}\n` +
+          `📅 *Start Date:* ${startDate}\n` +
+          `📅 *Expiry Date:* ${expiryDate}\n` +
+          `📝 *Notes:* ${updatedData.notes || existingClient?.notes || 'None'}`;
+
+        await sendTelegramNotification(tgConvMessage, "custom");
+      }
+
+      // Bidirectional sync: Content Planner to Tasks
+      if (existingClient && clientData.contentPlanner && clientData.contentPlanner.days) {
+        const updatedDays = clientData.contentPlanner.days;
+        const clientName = clientData.name || existingClient?.name || '';
+        const clientBusinessName = clientData.businessName || existingClient?.businessName || '';
+
+        // 1. Gather all active activities in the updated content planner
+        const activeActivities: { id: string; date: string; type: string; notes: string; status: string; customTypeName?: string }[] = [];
+        for (const dateKey of Object.keys(updatedDays)) {
+          const dayPlan = updatedDays[dateKey];
+          if (dayPlan && Array.isArray(dayPlan.activities)) {
+            for (const act of dayPlan.activities) {
+              activeActivities.push({
+                id: act.id,
+                date: dateKey,
+                type: act.type,
+                customTypeName: act.customTypeName,
+                notes: act.notes || '',
+                status: act.status
+              });
+            }
+          }
+        }
+
+        // 2. Find all existing tasks linked to this client that have a plannerActivityId
+        const clientLinkedTasks = tasks.filter(t => t.clientId === id && t.plannerActivityId);
+
+        // Map existing tasks by plannerActivityId
+        const existingTasksMap = new Map<string, typeof tasks[0]>();
+        clientLinkedTasks.forEach(t => {
+          if (t.plannerActivityId) {
+            existingTasksMap.set(t.plannerActivityId, t);
+          }
+        });
+
+        // 3. Sync each active activity
+        const mapActivityTypeToTaskType = (type: string): Task['type'] => {
+          const t = type.toLowerCase();
+          if (t.includes('shoot')) return 'Shoot';
+          if (t.includes('edit')) return 'Editing';
+          if (t.includes('poster') || t.includes('carousel') || t.includes('design') || t.includes('graphic')) return 'Poster';
+          if (t.includes('ads') || t.includes('google') || t.includes('meta')) return 'Ads';
+          if (t.includes('website')) return 'Website';
+          if (t.includes('print')) return 'Printing';
+          return 'Editing'; // fallback default
+        };
+
+        for (const act of activeActivities) {
+          const matchedTask = existingTasksMap.get(act.id);
+          const isCompleted = act.status === 'Completed' || act.status === 'Posted';
+          const taskStatus: Task['status'] = isCompleted ? 'Completed' : (act.status === 'In Progress' ? 'In Progress' : 'Pending');
+          const actName = act.type === 'Custom Activity' ? (act.customTypeName || 'Custom Activity') : act.type;
+          const expectedTitle = `${actName} (${clientBusinessName || clientName})`;
+
+          if (matchedTask) {
+            // Task already exists, check if we need to update it
+            const needsUpdate = 
+              matchedTask.dueDate !== act.date ||
+              matchedTask.completed !== isCompleted ||
+              matchedTask.status !== taskStatus ||
+              matchedTask.title !== expectedTitle ||
+              matchedTask.notes !== act.notes;
+
+            if (needsUpdate) {
+              const taskRef = doc(db, 'tasks', matchedTask.id);
+              await updateDoc(taskRef, {
+                dueDate: act.date,
+                completed: isCompleted,
+                status: taskStatus,
+                title: expectedTitle,
+                notes: act.notes
+              });
+            }
+          } else {
+            // Task does not exist, create it!
+            const newTaskType = mapActivityTypeToTaskType(act.type);
+            const autoAssignedTo = getAutoAssignee(expectedTitle, newTaskType, act.notes, true, false, true) || 'Bhargav';
+            await addDoc(collection(db, 'tasks'), sanitizeForFirestore({
+              title: expectedTitle,
+              dueDate: act.date,
+              completed: isCompleted,
+              status: taskStatus,
+              type: newTaskType,
+              clientId: id,
+              clientName: clientName,
+              assignedTo: autoAssignedTo,
+              priority: 'Medium',
+              plannerActivityId: act.id,
+              notes: act.notes,
+              createdBy: currentUser.uid,
+              createdAt: new Date().toISOString()
+            }));
+          }
+        }
+
+        // 4. Delete tasks for activities that were deleted
+        const activeActivityIds = new Set(activeActivities.map(a => a.id));
+        for (const [activityId, taskObj] of existingTasksMap.entries()) {
+          if (!activeActivityIds.has(activityId)) {
+            // This activity was deleted, delete its corresponding task!
+            const taskRef = doc(db, 'tasks', taskObj.id);
+            await deleteDoc(taskRef);
+          }
+        }
+      }
 
       if (isPaymentAdded && addedPayment) {
         sendTelegramNotification("", "payment_added", {
@@ -534,6 +910,59 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `clients/${id}`);
     }
+
+    // Bidirectional sync: Client to Lead and other modules
+    if (existingClient) {
+      const leadId = clientData.leadId || existingClient.leadId;
+      const linkedLead = leads.find(l => l.id === leadId || (existingClient.mobile && l.mobile === existingClient.mobile));
+      if (linkedLead) {
+        const leadSyncData: Partial<Lead> = {};
+        if (clientData.name && clientData.name !== linkedLead.name) leadSyncData.name = clientData.name;
+        if (clientData.businessName && clientData.businessName !== linkedLead.business) leadSyncData.business = clientData.businessName;
+        if (clientData.mobile && clientData.mobile !== linkedLead.mobile) leadSyncData.mobile = clientData.mobile;
+        if (clientData.email && clientData.email !== linkedLead.email) leadSyncData.email = clientData.email;
+        if (clientData.address && clientData.address !== linkedLead.address) leadSyncData.address = clientData.address;
+
+        if (Object.keys(leadSyncData).length > 0) {
+          const leadRef = doc(db, 'leads', linkedLead.id);
+          await updateDoc(leadRef, sanitizeForFirestore(leadSyncData));
+        }
+      }
+
+      // Sync all Tasks associated with this Client
+      const updatedClientName = clientData.name || existingClient.name;
+      const linkedTasks = tasks.filter(t => t.clientId === id || (linkedLead && t.leadId === linkedLead.id));
+      for (const t of linkedTasks) {
+        const taskSyncPayload: Partial<Task> = {};
+        if (t.clientId === id && t.clientName !== updatedClientName) {
+          taskSyncPayload.clientName = updatedClientName;
+        }
+        if (linkedLead && t.leadId === linkedLead.id && t.leadName !== updatedClientName) {
+          taskSyncPayload.leadName = updatedClientName;
+        }
+        if (Object.keys(taskSyncPayload).length > 0) {
+          const tRef = doc(db, 'tasks', t.id);
+          await updateDoc(tRef, taskSyncPayload);
+        }
+      }
+
+      // Sync all Followups associated with this Client
+      const updatedBusinessName = clientData.businessName || existingClient.businessName;
+      const updatedMobile = clientData.mobile || existingClient.mobile;
+      const linkedFollowups = followUps.filter(f => f.clientId === id || (linkedLead && f.clientId === linkedLead.id) || (existingClient.mobile && f.mobile === existingClient.mobile));
+      for (const f of linkedFollowups) {
+        const followupSyncPayload: Partial<FollowUp> = {};
+        if (f.clientName !== updatedClientName) followupSyncPayload.clientName = updatedClientName;
+        if (f.businessName !== updatedBusinessName) followupSyncPayload.businessName = updatedBusinessName;
+        if (f.mobile !== updatedMobile) followupSyncPayload.mobile = updatedMobile;
+
+        if (Object.keys(followupSyncPayload).length > 0) {
+          const fRef = doc(db, 'followups', f.id);
+          await updateDoc(fRef, sanitizeForFirestore(followupSyncPayload));
+        }
+      }
+    }
+
     await logActivity('client_updated', `Updated client details for: ${clientData.name || existingClient?.name || 'Client'}`, id);
   };
 
@@ -702,7 +1131,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    const updatedTimeline = [...(existingLead.timeline || []), ...newTimelineItems];
+    const updatedTimeline = [...(leadData.timeline || existingLead.timeline || []), ...newTimelineItems];
 
     const tentativeLead: Lead = {
       ...existingLead,
@@ -728,6 +1157,59 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await updateDoc(docRef, sanitizeForFirestore(finalUpdatedData));
       await logActivity('lead_updated', `Updated lead: ${existingLead.name} (${customAction || 'Details Updated'})`);
+
+      // Real-time synchronization to linked Client and other modules
+      const linkedClient = clients.find(c => c.leadId === id || (existingLead.mobile && c.mobile === existingLead.mobile));
+      if (linkedClient) {
+        const clientSyncData: Partial<Client> = {};
+        if (leadData.name && leadData.name !== linkedClient.name) clientSyncData.name = leadData.name;
+        if (leadData.business && leadData.business !== linkedClient.businessName) clientSyncData.businessName = leadData.business;
+        if (leadData.mobile) {
+          if (leadData.mobile !== linkedClient.mobile) clientSyncData.mobile = leadData.mobile;
+          if (leadData.mobile !== linkedClient.whatsApp) clientSyncData.whatsApp = leadData.mobile;
+        }
+        if (leadData.email && leadData.email !== linkedClient.email) clientSyncData.email = leadData.email;
+        if (leadData.address && leadData.address !== linkedClient.address) clientSyncData.address = leadData.address;
+
+        if (Object.keys(clientSyncData).length > 0) {
+          const clientRef = doc(db, 'clients', linkedClient.id);
+          await updateDoc(clientRef, sanitizeForFirestore(clientSyncData));
+        }
+      }
+
+      // Sync all Tasks linked with leadId or clientId
+      const updatedLeadName = leadData.name || existingLead.name;
+      const updatedClientName = leadData.name || existingLead.name;
+      const linkedTasks = tasks.filter(t => t.leadId === id || (linkedClient && t.clientId === linkedClient.id));
+      for (const t of linkedTasks) {
+        const taskSyncPayload: Partial<Task> = {};
+        if (t.leadId === id && t.leadName !== updatedLeadName) {
+          taskSyncPayload.leadName = updatedLeadName;
+        }
+        if (linkedClient && t.clientId === linkedClient.id && t.clientName !== updatedClientName) {
+          taskSyncPayload.clientName = updatedClientName;
+        }
+        if (Object.keys(taskSyncPayload).length > 0) {
+          const tRef = doc(db, 'tasks', t.id);
+          await updateDoc(tRef, taskSyncPayload);
+        }
+      }
+
+      // Sync all Followups linked with leadId or clientId
+      const updatedBusinessName = leadData.business || existingLead.business;
+      const updatedMobile = leadData.mobile || existingLead.mobile;
+      const linkedFollowups = followUps.filter(f => f.clientId === id || (linkedClient && f.clientId === linkedClient.id) || (existingLead.mobile && f.mobile === existingLead.mobile));
+      for (const f of linkedFollowups) {
+        const followupSyncPayload: Partial<FollowUp> = {};
+        if (f.clientName !== updatedLeadName) followupSyncPayload.clientName = updatedLeadName;
+        if (f.businessName !== updatedBusinessName) followupSyncPayload.businessName = updatedBusinessName;
+        if (f.mobile !== updatedMobile) followupSyncPayload.mobile = updatedMobile;
+
+        if (Object.keys(followupSyncPayload).length > 0) {
+          const fRef = doc(db, 'followups', f.id);
+          await updateDoc(fRef, sanitizeForFirestore(followupSyncPayload));
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `leads/${id}`);
       throw error;
@@ -741,6 +1223,24 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const leadName = lead ? lead.name : 'Unknown';
 
     try {
+      // 1. Cascade delete linked tasks where task.leadId === id
+      const qTasks = query(collection(db, 'tasks'), where('leadId', '==', id));
+      const snapTasks = await getDocs(qTasks);
+      const deletePromises: Promise<void>[] = [];
+      snapTasks.forEach((docSnap) => {
+        deletePromises.push(deleteDoc(doc(db, 'tasks', docSnap.id)));
+      });
+
+      // 2. Cascade delete linked followups where followup.clientId === id
+      const qFollowups = query(collection(db, 'followups'), where('clientId', '==', id));
+      const snapFollowups = await getDocs(qFollowups);
+      snapFollowups.forEach((docSnap) => {
+        deletePromises.push(deleteDoc(doc(db, 'followups', docSnap.id)));
+      });
+
+      await Promise.all(deletePromises);
+
+      // 3. Delete Lead document itself (never delete a linked Client)
       await deleteDoc(doc(db, 'leads', id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `leads/${id}`);
@@ -756,8 +1256,37 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ) => {
     if (!currentUser) throw new Error("User must be authenticated");
 
-    // 1. Create client
-    await addClient(clientDetails, imageFile);
+    const lead = leads.find(l => l.id === leadId);
+    const leadNotes = lead?.notes || '';
+    let leadHistoryText = '';
+    if (lead?.timeline && lead.timeline.length > 0) {
+      leadHistoryText = '\n\n--- LEAD TIMELINE HISTORY ---\n' + lead.timeline.map(t => `[${t.date} ${t.time}] ${t.action}: ${t.notes || ''}`).join('\n');
+    }
+
+    const mergedNotes = (clientDetails.notes || '') + (leadNotes ? `\n\nLead Notes: ${leadNotes}` : '') + leadHistoryText;
+    const finalClientDetails = {
+      ...clientDetails,
+      notes: mergedNotes,
+      leadId: leadId
+    };
+
+    // Prevent duplicates: search for an existing client that is already linked or matches mobile / business
+    const existingClient = clients.find(c => 
+      c.leadId === leadId || 
+      (lead?.mobile && c.mobile === lead.mobile) || 
+      (lead?.business && c.businessName?.toLowerCase() === lead.business.toLowerCase())
+    );
+
+    if (existingClient) {
+      // Link and update existing client rather than creating a duplicate
+      await updateClient(existingClient.id, {
+        ...finalClientDetails,
+        leadId: leadId
+      }, imageFile);
+    } else {
+      // Create new client if none exists
+      await addClient(finalClientDetails, imageFile);
+    }
 
     // 2. Update Lead status to 'Converted'
     const leadRef = doc(db, 'leads', leadId);
@@ -782,11 +1311,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notes?: string,
     leadId?: string,
     leadName?: string,
-    assignedTo?: Task['assignedTo'],
+    assignedTo?: Task['assignedTo'] | 'auto' | null,
     priority?: Task['priority'],
     plannerActivityId?: string
   ) => {
     if (!currentUser) throw new Error("User must be authenticated");
+
+    const autoAssignee = (assignedTo === undefined || (assignedTo as any) === 'auto') ? getAutoAssignee(
+      title, 
+      type, 
+      notes, 
+      !!plannerActivityId, 
+      !!leadId || !!leadName, 
+      !!clientId || !!clientName
+    ) : assignedTo;
 
     const newTask = {
       title,
@@ -798,7 +1336,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clientName: clientName || null,
       leadId: leadId || null,
       leadName: leadName || null,
-      assignedTo: assignedTo || null,
+      assignedTo: autoAssignee || null,
       priority: priority || 'Medium',
       plannerActivityId: plannerActivityId || null,
       notes: notes || '',
@@ -843,6 +1381,56 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const task = tasks.find(t => t.id === id);
     if (task) {
       await logActivity('task_completed', `Marked task "${task.title}" as ${status}`);
+
+      // Sync task completion with content planner activity
+      if (task.clientId && task.plannerActivityId) {
+        const clientObj = clients.find(c => c.id === task.clientId);
+        if (clientObj && clientObj.contentPlanner && clientObj.contentPlanner.days) {
+          let updated = false;
+          const updatedDays = { ...clientObj.contentPlanner.days };
+          for (const dateKey of Object.keys(updatedDays)) {
+            const dayPlan = updatedDays[dateKey];
+            if (dayPlan && Array.isArray(dayPlan.activities)) {
+              const acts = dayPlan.activities.map(act => {
+                if (act.id === task.plannerActivityId) {
+                  updated = true;
+                  return { ...act, status: (completed ? 'Completed' : 'Planned') as any };
+                }
+                return act;
+              });
+              if (updated) {
+                updatedDays[dateKey] = { ...dayPlan, activities: acts };
+                break;
+              }
+            }
+          }
+          if (updated) {
+            const clientRef = doc(db, 'clients', task.clientId);
+            await updateDoc(clientRef, {
+              'contentPlanner.days': updatedDays
+            });
+          }
+        }
+      }
+
+      // Send Telegram notification if completed
+      if (completed) {
+        try {
+          const matchedClient = clients.find(c => c.id === task.clientId);
+          const businessName = matchedClient ? (matchedClient.businessName || matchedClient.name) : 'N/A';
+          await sendTelegramNotification("", "followup_created", {
+            ...task,
+            status: 'Completed',
+            completed: true,
+            clientName: task.clientName || matchedClient?.name || 'N/A',
+            businessName,
+            address: matchedClient?.address,
+            notes: task.notes
+          });
+        } catch (tgErr) {
+          console.error("Failed to send task completion Telegram alert:", tgErr);
+        }
+      }
     }
   };
 
@@ -852,6 +1440,18 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const taskRef = doc(db, 'tasks', id);
     const dataToUpdate = { ...taskData };
     delete dataToUpdate.id;
+
+    if ((dataToUpdate.assignedTo as any) === 'auto') {
+      const existingTask = tasks.find(t => t.id === id);
+      dataToUpdate.assignedTo = getAutoAssignee(
+        dataToUpdate.title || existingTask?.title || '',
+        dataToUpdate.type || existingTask?.type,
+        dataToUpdate.notes || existingTask?.notes,
+        !!(dataToUpdate.plannerActivityId || existingTask?.plannerActivityId),
+        !!(dataToUpdate.leadId || existingTask?.leadId),
+        !!(dataToUpdate.clientId || existingTask?.clientId)
+      );
+    }
 
     if (dataToUpdate.status) {
       dataToUpdate.completed = dataToUpdate.status === 'Completed';
@@ -864,7 +1464,66 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `tasks/${id}`);
     }
-    await logActivity('task_completed', `Updated task details for "${taskData.title || 'Task'}"`);
+
+    const task = tasks.find(t => t.id === id);
+    if (task) {
+      await logActivity('task_completed', `Updated task details for "${taskData.title || 'Task'}"`);
+
+      // Sync task details with content planner activity if status/completed changed
+      const isCompleted = dataToUpdate.completed ?? taskData.completed ?? task.completed;
+      const statusVal = isCompleted ? 'Completed' : 'Planned';
+
+      if (task.clientId && task.plannerActivityId) {
+        const clientObj = clients.find(c => c.id === task.clientId);
+        if (clientObj && clientObj.contentPlanner && clientObj.contentPlanner.days) {
+          let updated = false;
+          const updatedDays = { ...clientObj.contentPlanner.days };
+          for (const dateKey of Object.keys(updatedDays)) {
+            const dayPlan = updatedDays[dateKey];
+            if (dayPlan && Array.isArray(dayPlan.activities)) {
+              const acts = dayPlan.activities.map(act => {
+                if (act.id === task.plannerActivityId) {
+                  updated = true;
+                  return { ...act, status: statusVal as any };
+                }
+                return act;
+              });
+              if (updated) {
+                updatedDays[dateKey] = { ...dayPlan, activities: acts };
+                break;
+              }
+            }
+          }
+          if (updated) {
+            const clientRef = doc(db, 'clients', task.clientId);
+            await updateDoc(clientRef, {
+              'contentPlanner.days': updatedDays
+            });
+          }
+        }
+      }
+
+      // Send Telegram notification if newly completed
+      const wasCompleted = task.completed;
+      if (isCompleted && !wasCompleted) {
+        try {
+          const matchedClient = clients.find(c => c.id === task.clientId);
+          const businessName = matchedClient ? (matchedClient.businessName || matchedClient.name) : 'N/A';
+          await sendTelegramNotification("", "followup_created", {
+            ...task,
+            ...dataToUpdate,
+            status: 'Completed',
+            completed: true,
+            clientName: task.clientName || matchedClient?.name || 'N/A',
+            businessName,
+            address: matchedClient?.address,
+            notes: dataToUpdate.notes || task.notes
+          });
+        } catch (tgErr) {
+          console.error("Failed to send task completion Telegram alert:", tgErr);
+        }
+      }
+    }
   };
 
   const deleteTask = async (id: string) => {
@@ -1046,6 +1705,72 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Send client-wise grouped Today's Work summary to Telegram
+  const sendTodayWorkSummary = async () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
+    let msg = `📅 *AB GRAPHICS - DAILY AGENCY WORKPLAN*\n`;
+    msg += `Date: *${todayStr}*\n\n`;
+
+    let activeClientsWithWork = 0;
+
+    clients.forEach((c) => {
+      if (c.status !== 'Active') return;
+
+      const dayPlan = c.contentPlanner?.days?.[todayStr];
+      const clientTasks = tasks.filter(t => t.clientId === c.id && t.dueDate === todayStr);
+
+      const activities = dayPlan?.activities || [];
+
+      if (activities.length === 0 && clientTasks.length === 0) {
+        return;
+      }
+
+      activeClientsWithWork++;
+      msg += `🏢 *CLIENT: ${c.businessName || c.name}*\n`;
+
+      if (activities.length > 0) {
+        msg += `• *Content Planner Checklist:*\n`;
+        activities.forEach(act => {
+          const actName = act.type === 'Custom Activity' ? (act.customTypeName || 'Custom Activity') : act.type;
+          msg += `  - [${act.status}] *${actName}* ${act.notes ? `: ${act.notes}` : ''}\n`;
+        });
+      }
+
+      if (clientTasks.length > 0) {
+        msg += `• *Team Operations Tasks:*\n`;
+        // Group by assignee
+        const byAssignee: Record<string, typeof clientTasks> = {};
+        clientTasks.forEach(t => {
+          const assignee = t.assignedTo || 'Unassigned';
+          if (!byAssignee[assignee]) byAssignee[assignee] = [];
+          byAssignee[assignee].push(t);
+        });
+
+        Object.keys(byAssignee).forEach(assignee => {
+          msg += `  👤 *${assignee}:*\n`;
+          byAssignee[assignee].forEach(t => {
+            msg += `    - [${t.status}] *${t.title}* (Priority: ${t.priority || 'Medium'})${t.notes ? `\n      _${t.notes}_` : ''}\n`;
+          });
+        });
+      }
+
+      msg += `\n-----------------------------------------\n\n`;
+    });
+
+    if (activeClientsWithWork === 0) {
+      msg += `No marketing activities or team tasks scheduled for today. Ready for scheduling!`;
+    } else {
+      msg += `🚀 Let's deliver phenomenal results today!\n_Grouped for Bhargav & Adhwaryu_`;
+    }
+
+    await sendTelegramNotification(msg, 'custom');
+  };
+
   // Compute Dashboard Stats
   const stats = useMemo<DashboardStats>(() => {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -1105,6 +1830,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateTelegramSettings,
     updateBrandSettings,
     sendTelegramNotification,
+    sendTodayWorkSummary,
     stats
   }), [
     clients,
@@ -1134,6 +1860,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateTelegramSettings,
     updateBrandSettings,
     sendTelegramNotification,
+    sendTodayWorkSummary,
     stats
   ]);
 

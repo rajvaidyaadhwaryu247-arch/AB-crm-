@@ -22,9 +22,24 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import { motion } from 'motion/react';
 
 export const Dashboard: React.FC = () => {
-  const { clients, leads, tasks, activities, stats, addTask, toggleTask, deleteTask } = useCRM();
+  const { clients, leads, tasks, activities, stats, addTask, toggleTask, deleteTask, sendTodayWorkSummary } = useCRM();
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [taskDueDate, setTaskDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isSendingSummary, setIsSendingSummary] = useState(false);
+
+  const handleSendDailySummary = async () => {
+    if (!sendTodayWorkSummary) return;
+    setIsSendingSummary(true);
+    try {
+      await sendTodayWorkSummary();
+      alert("📅 Today's Agency Workplan compiled and successfully dispatched to Telegram!");
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ Failed to send summary: ${err.message || err}`);
+    } finally {
+      setIsSendingSummary(false);
+    }
+  };
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,9 +96,19 @@ export const Dashboard: React.FC = () => {
     <div className="space-y-6 font-sans">
       
       {/* Header Greeting */}
-      <div className="pb-2">
-        <h2 className="text-2xl font-bold text-white tracking-tight">Executive Dashboard</h2>
-        <p className="text-sm text-gray-500 mt-1">Real-time performance metrics for AB Graphics campaigns.</p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-2 gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Executive Dashboard</h2>
+          <p className="text-sm text-gray-500 mt-1">Real-time performance metrics for AB Graphics campaigns.</p>
+        </div>
+        <button
+          onClick={handleSendDailySummary}
+          disabled={isSendingSummary}
+          className="self-start md:self-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-800 disabled:text-gray-600 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-emerald-500/5"
+        >
+          <Send className={`h-3.5 w-3.5 ${isSendingSummary ? 'animate-pulse' : ''}`} />
+          {isSendingSummary ? 'Dispatching Summary...' : "Send Today's Work Plan to Telegram"}
+        </button>
       </div>
 
       {/* Grid of Stats Cards */}

@@ -242,8 +242,9 @@ export const ClientManagement: React.FC = () => {
   // Package renewal submission handler
   const handleRenewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!renewClient) return;
+    if (!renewClient || isSaving) return;
 
+    setIsSaving(true);
     try {
       const calculatedExpiry = calculateExpiryDate(renewStartDate, renewDuration);
       
@@ -293,6 +294,8 @@ export const ClientManagement: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       alert(`Error renewing campaign: ${err.message || err}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -312,6 +315,7 @@ export const ClientManagement: React.FC = () => {
   const [mobile, setMobile] = useState('');
   const [whatsApp, setWhatsApp] = useState('');
   const [email, setEmail] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [address, setAddress] = useState('');
   const [gstNumber, setGstNumber] = useState('');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -322,7 +326,7 @@ export const ClientManagement: React.FC = () => {
   const [imagePreview, setImagePreview] = useState<string>('');
 
   // Package & Services Form States
-  const [packageType, setPackageType] = useState<'Basic' | 'Advance' | 'Pro' | 'Custom'>('Basic');
+  const [packageType, setPackageType] = useState<'Basic' | 'Advance' | 'Pro' | 'Custom' | 'Quick Service'>('Basic');
   const [customPackageName, setCustomPackageName] = useState('');
   const [packagePrice, setPackagePrice] = useState(10000); // Package price (INR)
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -353,6 +357,57 @@ export const ClientManagement: React.FC = () => {
       }
     }
   }, [clients, selectedClient]);
+
+  // Handle Form open for Add Quick Service
+  const openAddQuickServiceModal = () => {
+    setEditingClient(null);
+    setName('');
+    setBusinessName('');
+    setMobile('');
+    setWhatsApp('');
+    setEmail('');
+    setAddress('');
+    setGstNumber('');
+    const today = new Date().toISOString().split('T')[0];
+    setStartDate(today);
+    setPackageDuration('One-Time');
+    setExpiryDate(today);
+    setNotes('');
+    setImageFile(null);
+    setImagePreview('');
+    
+    // Quick Service defaults
+    setPackageType('Quick Service');
+    setCustomPackageName('1 Reel');
+    setPackagePrice(1500);
+    setSelectedServices(['Reel Editing']);
+    
+    // Initial Payment Reset
+    setInitialPaymentAmount(0);
+    setInitialPaymentMode('UPI');
+    setInitialPaymentType('Advance');
+    setInitialPaymentNotes('');
+
+    setIsFormOpen(true);
+  };
+
+  // Handle cross-component quick service activation
+  useEffect(() => {
+    // Check pending mount flag
+    if (typeof window !== 'undefined' && (window as any).openQuickServicePending) {
+      (window as any).openQuickServicePending = false;
+      openAddQuickServiceModal();
+    }
+
+    const handleOpenQuickService = () => {
+      openAddQuickServiceModal();
+    };
+
+    window.addEventListener('open-quick-service', handleOpenQuickService);
+    return () => {
+      window.removeEventListener('open-quick-service', handleOpenQuickService);
+    };
+  }, []);
 
   // Handle Form open for Add
   const openAddModal = () => {
@@ -427,7 +482,7 @@ export const ClientManagement: React.FC = () => {
   };
 
   // Auto-fill defaults when package changes
-  const handlePackageTypeChange = (type: 'Basic' | 'Advance' | 'Pro' | 'Custom') => {
+  const handlePackageTypeChange = (type: 'Basic' | 'Advance' | 'Pro' | 'Custom' | 'Quick Service') => {
     setPackageType(type);
     if (type === 'Basic') {
       setPackagePrice(10000);
@@ -465,6 +520,11 @@ export const ClientManagement: React.FC = () => {
         'WhatsApp Automation',
         'Website Development'
       ]);
+    } else if (type === 'Quick Service') {
+      setCustomPackageName('1 Reel');
+      setPackagePrice(1500);
+      setPackageDuration('One-Time');
+      setSelectedServices(['Reel Editing']);
     } else {
       setCustomPackageName('');
       setPackagePrice(0);
@@ -496,6 +556,8 @@ export const ClientManagement: React.FC = () => {
   // Form Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     try {
       let currentPayments: Payment[] = editingClient?.payments || [];
 
@@ -535,7 +597,7 @@ export const ClientManagement: React.FC = () => {
         profilePhoto: imagePreview || '',
         packageDetails: {
           type: packageType,
-          customName: packageType === 'Custom' ? customPackageName || 'Custom Package' : `${packageType} Package`,
+          customName: (packageType === 'Custom' || packageType === 'Quick Service') ? customPackageName || `${packageType} Work` : `${packageType} Package`,
           price: finalPackagePrice,
           duration: packageDuration,
           services: selectedServices
@@ -552,6 +614,8 @@ export const ClientManagement: React.FC = () => {
     } catch (err) {
       console.error("Form submit error:", err);
       alert("Failed to save client: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -574,8 +638,9 @@ export const ClientManagement: React.FC = () => {
   // Payment log inside Detail Modal
   const handleAddNewPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClient) return;
+    if (!selectedClient || isSaving) return;
 
+    setIsSaving(true);
     try {
       const newPayment: Payment = {
         id: 'pay_' + Date.now(),
@@ -620,6 +685,8 @@ export const ClientManagement: React.FC = () => {
     } catch (err) {
       console.error(err);
       alert("Failed to record payment transaction");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -662,7 +729,7 @@ export const ClientManagement: React.FC = () => {
       const matchesSearch = 
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.mobile.includes(searchTerm);
 
       const matchesStatus = 
@@ -682,12 +749,20 @@ export const ClientManagement: React.FC = () => {
           <h2 className="text-2xl font-bold text-white tracking-tight">Active Client Base</h2>
           <p className="text-sm text-gray-500 mt-1">Total of {clients.length} campaign accounts on file.</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/10 cursor-pointer text-sm transition-all duration-200 shrink-0"
-        >
-          <Plus className="h-5 w-5" /> Add Client
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={openAddQuickServiceModal}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-amber-500/10 cursor-pointer text-sm transition-all duration-200 shrink-0"
+          >
+            <span>⚡ Quick Service</span>
+          </button>
+          <button
+            onClick={openAddModal}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/10 cursor-pointer text-sm transition-all duration-200 shrink-0"
+          >
+            <Plus className="h-5 w-5" /> Add Client
+          </button>
+        </div>
       </div>
 
       {/* Filters & Search Row */}
@@ -928,24 +1003,44 @@ export const ClientManagement: React.FC = () => {
                       Follow-up
                     </button>
 
-                    {/* 6. Renew Package */}
-                    <button
-                      id={`renew-${client.id}`}
-                      onClick={() => {
-                        setRenewClient(client);
-                        setRenewStartDate(client.expiryDate);
-                        setRenewDuration(client.packageDuration);
-                        setRenewPrice(client.packageDetails?.price || 0);
-                        setRenewPaymentReceived(0);
-                        setRenewPaymentNotes(`Campaign renewal payment`);
-                        setIsRenewOpen(true);
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 bg-indigo-500/5 hover:bg-indigo-500 border border-indigo-500/10 hover:border-indigo-500 text-indigo-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
-                      title="Renew Campaign Package"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-                      Renew Package
-                    </button>
+                    {/* 6. Renew Package or Convert Quick Service to Client */}
+                    {client.packageDetails?.type === 'Quick Service' ? (
+                      <button
+                        id={`convert-client-${client.id}`}
+                        onClick={() => {
+                          openEditModal(client);
+                          // Pre-populate with standard conversion campaign defaults
+                          setPackageType('Basic');
+                          setPackagePrice(15000);
+                          setPackageDuration('1 Month');
+                          const today = new Date().toISOString().split('T')[0];
+                          setStartDate(today);
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500 hover:to-emerald-500 border border-emerald-500/20 text-emerald-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate font-bold"
+                        title="Convert Quick Service Customer to standard Campaign Client"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                        Convert Client
+                      </button>
+                    ) : (
+                      <button
+                        id={`renew-${client.id}`}
+                        onClick={() => {
+                          setRenewClient(client);
+                          setRenewStartDate(client.expiryDate);
+                          setRenewDuration(client.packageDuration);
+                          setRenewPrice(client.packageDetails?.price || 0);
+                          setRenewPaymentReceived(0);
+                          setRenewPaymentNotes(`Campaign renewal payment`);
+                          setIsRenewOpen(true);
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 bg-indigo-500/5 hover:bg-indigo-500 border border-indigo-500/10 hover:border-indigo-500 text-indigo-400 hover:text-slate-950 rounded-xl transition-all cursor-pointer truncate"
+                        title="Renew Campaign Package"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                        Renew Package
+                      </button>
+                    )}
 
                     {/* 7. Delete Client */}
                     <button
@@ -1073,10 +1168,9 @@ export const ClientManagement: React.FC = () => {
               {/* Email and Address */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-400">Email Address <span className="text-emerald-400">*</span></label>
+                  <label className="block text-xs font-medium text-gray-400">Email Address (Optional)</label>
                   <input
                     type="email"
-                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="e.g. client@example.com"
@@ -1125,6 +1219,7 @@ export const ClientManagement: React.FC = () => {
                     onChange={(e) => setPackageDuration(e.target.value)}
                     className="mt-1 block w-full bg-[#0d0d0d] border border-emerald-900/20 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
                   >
+                    <option value="One-Time">One-Time Project</option>
                     <option value="1 Month">1 Month Campaign</option>
                     <option value="3 Months">3 Months Campaign</option>
                     <option value="6 Months">6 Months Campaign</option>
@@ -1163,6 +1258,7 @@ export const ClientManagement: React.FC = () => {
                       <option value="Basic">Basic Package (Default)</option>
                       <option value="Advance">Advance Package (Default)</option>
                       <option value="Pro">Pro Package (Default)</option>
+                      <option value="Quick Service">⚡ Quick Service (One-Time)</option>
                       <option value="Custom">Custom Package</option>
                     </select>
                   </div>
@@ -1179,6 +1275,55 @@ export const ClientManagement: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                {packageType === 'Quick Service' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-3 p-4 bg-slate-900/40 rounded-xl border border-slate-800"
+                  >
+                    <div>
+                      <label className="block text-xs font-medium text-emerald-400">Quick Service Scope / Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={customPackageName}
+                        onChange={(e) => setCustomPackageName(e.target.value)}
+                        placeholder="e.g. 1 Reel, Poster, Logo"
+                        className="mt-1 block w-full bg-[#141414] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-400 mb-1.5">Select a Quick Service Preset:</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { name: '1 Reel', price: 1500, service: 'Reel Editing' },
+                          { name: 'Poster', price: 500, service: 'Poster Design' },
+                          { name: 'Banner', price: 1000, service: 'Banner Design' },
+                          { name: 'Logo', price: 2500, service: 'Logo Design' },
+                          { name: 'Visiting Card', price: 600, service: 'Visiting Card Design' },
+                        ].map(preset => (
+                          <button
+                            key={preset.name}
+                            type="button"
+                            onClick={() => {
+                              setCustomPackageName(preset.name);
+                              setPackagePrice(preset.price);
+                              setSelectedServices([preset.service]);
+                            }}
+                            className={`text-xs px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                              customPackageName === preset.name
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
+                                : 'bg-[#141414] text-gray-300 border-slate-850 hover:border-slate-750'
+                            }`}
+                          >
+                            {preset.name} (₹{preset.price})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
 
                 {packageType === 'Custom' && (
                   <motion.div
@@ -1314,9 +1459,10 @@ export const ClientManagement: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-md"
+                  disabled={isSaving}
+                  className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Save Campaign
+                  {isSaving ? 'Saving...' : 'Save Campaign'}
                 </button>
               </div>
             </form>
@@ -1432,7 +1578,7 @@ export const ClientManagement: React.FC = () => {
                       <div className="space-y-1">
                         <p className="text-xs text-gray-500">Email Address</p>
                         <p className="text-white flex items-center gap-1.5">
-                          <Mail className="h-4 w-4 text-gray-500" /> {selectedClient.email}
+                          <Mail className="h-4 w-4 text-gray-500" /> {selectedClient.email || 'Not Provided'}
                         </p>
                       </div>
                       <div className="space-y-1">
@@ -1794,9 +1940,10 @@ export const ClientManagement: React.FC = () => {
                               </button>
                               <button
                                 type="submit"
-                                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition-colors"
+                                disabled={isSaving}
+                                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                Record Transaction
+                                {isSaving ? 'Recording...' : 'Record Transaction'}
                               </button>
                             </div>
                           </motion.form>
@@ -2359,9 +2506,10 @@ export const ClientManagement: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-emerald-500 text-slate-950 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-emerald-400 transition-colors"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 bg-emerald-500 text-slate-950 text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Renew Campaign
+                  {isSaving ? 'Renewing...' : 'Renew Campaign'}
                 </button>
               </div>
             </form>

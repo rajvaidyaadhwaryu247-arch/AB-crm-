@@ -529,6 +529,91 @@ async function startServer() {
     });
   };
 
+  // Helper for resilient Gemini API calls with retries and robust backoff
+  const generateContentWithRetry = async (aiInstance: any, prompt: string, config: any) => {
+    // List of models to try in order
+    const modelsToTry = [
+      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-flash-latest'
+    ];
+
+    let lastError: any = null;
+
+    for (const modelName of modelsToTry) {
+      const maxAttemptsPerModel = 2;
+      for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt++) {
+        try {
+          console.log(`[Gemini API] Attempting generation with model ${modelName} (Attempt ${attempt}/${maxAttemptsPerModel})`);
+          const response = await aiInstance.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: config
+          });
+
+          if (response && response.text) {
+            console.log(`[Gemini API] Successfully generated content using model: ${modelName}`);
+            return response;
+          }
+          throw new Error('Empty response received from Gemini');
+        } catch (error: any) {
+          lastError = error;
+          const errMsg = error.message || '';
+          const errString = String(error);
+          const errJSON = JSON.stringify(error);
+          
+          console.warn(`[Gemini API] Failed on model ${modelName} (Attempt ${attempt}/${maxAttemptsPerModel}):`, errMsg || errString);
+
+          // Check if it's a 404 NOT_FOUND error (meaning model is not available/deprecated)
+          const isNotFoundError = 
+            errMsg.includes('404') || 
+            errMsg.includes('NOT_FOUND') || 
+            errMsg.includes('no longer available') ||
+            errString.includes('404') || 
+            errString.includes('NOT_FOUND') ||
+            errString.includes('no longer available') ||
+            errJSON.includes('404') || 
+            errJSON.includes('NOT_FOUND') ||
+            errJSON.includes('no longer available') ||
+            error.status === 404 ||
+            error.statusCode === 404 ||
+            (error.error && error.error.code === 404);
+
+          if (isNotFoundError) {
+            console.log(`[Gemini API] Model ${modelName} reported 404/NOT_FOUND. Skipping further retries for this model.`);
+            break; // Break the inner loop to try the next model immediately
+          }
+
+          // If we have more attempts for this model, delay with exponential backoff
+          if (attempt < maxAttemptsPerModel) {
+            const delayMs = attempt * 1500;
+            console.log(`[Gemini API] Retrying model ${modelName} in ${delayMs}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
+        }
+      }
+      console.warn(`[Gemini API] Model ${modelName} failed or was skipped. Trying next fallback...`);
+    }
+
+    throw lastError || new Error('All Gemini models and retries failed.');
+  };
+
+  // Helper to safely extract and parse JSON from a response string
+  const cleanAndParseJSON = (text: string) => {
+    let cleaned = text.trim();
+    
+    // Remove markdown code block markers if present
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\n?/i, '');
+      cleaned = cleaned.replace(/\n?```$/, '');
+      cleaned = cleaned.trim();
+    }
+    
+    return JSON.parse(cleaned);
+  };
+
   app.post('/api/gemini/generate-planner', async (req, res) => {
     try {
       const {
@@ -540,7 +625,8 @@ async function startServer() {
         campaignObjective,
         startDate,
         endDate,
-        datesList
+        datesList,
+        season
       } = req.body;
 
       if (!businessType || !startDate || !endDate || !datesList || !Array.isArray(datesList)) {
@@ -550,7 +636,7 @@ async function startServer() {
         });
       }
 
-      console.log(`[Gemini API] Generating monthly strategy for ${businessType} with package ${packageName}`);
+      console.log(`[Gemini API] Generating monthly strategy for ${businessType} with package ${packageName}, season ${season || 'Standard'}`);
 
       const aiInstance = getGenAI();
       const prompt = `You are an elite, results-driven Digital Marketing Director and Content Strategist. Your goal is to design a high-converting, fully customized monthly digital marketing campaign and operations plan for a client.
@@ -562,24 +648,30 @@ CLIENT PROFILE & DIRECTION:
 - Budget Bracket: ${budget || 'Standard / Flexible'}
 - Target Customer Audience: ${targetAudience || 'General Demographics'}
 - Key Campaign Objective: ${campaignObjective || 'Boost local walk-ins and direct inquiries'}
+- Selected Season/Occasion: ${season || 'Normal Season'}
 - Implementation Period: ${startDate} to ${endDate}
 
 DATES FOR THE CALENDAR (Generate exactly one activity block for each date listed below):
 ${JSON.stringify(datesList)}
 
 STRICT OPERATIONAL DIRECTIVES:
-1. You must assign daily deliverables across Instagram, Facebook, and WhatsApp based on the package and goal. Make notes hyper-specific, with actual copy ideas, content briefs, reels ideas, design guidelines, or copywriting hooks.
-2. Produce a list of 4 to 8 high-level "Linked Tasks" for the operations team:
-   - "Bhargav" (Creative Head) handles Shoots, Editing, Posters, Design briefs.
-   - "Adhwaryu" (Client Handling, Lead Management, CRM Operations) handles setting up ads, coordinating with clients, doing outreach, or launch preparations.
-   - "Pari" (Assistant, Scheduling, Reports, Planner, Follow-ups) handles scheduling posts, drafting reports, setting up reminders, and client follow-ups.
-3. Every task must have a title, target due date (which should fall logically during or before the content dates), operational type (one of: Shoot, Editing, Poster, Ads, Website, Printing), priority (Low, Medium, High), assignedTo (one of: Bhargav, Adhwaryu, Pari), and notes explaining exactly what to do.
+1. CUSTOMIZATION & UNIQUENESS: Never generate a generic plan. Every strategy and piece of copy must be hyper-specific to the client's business type "${businessType}" and the season/occasion "${season || 'Normal Season'}". Provide concrete post/reel concepts, copy hooks, and visual details.
+2. REEL SCHEDULING GAP: You MUST maintain a minimum of 1-2 days of gap between any Reel/Short activities (Instagram Reel, Facebook Reel, YouTube Short). Do not schedule any Reel/Short activities on consecutive days or the same day.
+3. INTELLIGENT DISTRIBUTION: Distribute Posts, Stories, and Ads intelligently. Instagram/Facebook Stories and WhatsApp Status can run daily, but main grid Posts and Ads checks should be scattered elegantly.
+4. NO AI ASSIGNMENT: AI must NEVER assign team members to tasks. You are strictly forbidden from assigning team members. The 'assignedTo' field in the 'tasks' array MUST always be an empty string "" or null. The business owner manually assigns every task.
+5. STRATEGY HIERARCHY: Generate a coherent strategic narrative following the flow: Monthly Strategy → Weekly Themes → Daily Calendar → Content Topics.
 
 You MUST respond with valid JSON matching this structure (do not wrap in markdown blocks, just return raw JSON):
 {
   "strategyTitle": "String - Compelling campaign theme",
   "highLevelStrategy": "String - High-level strategic reasoning, theme explanation, and visual tone",
   "keyMetrics": "String - 3 to 4 metrics to monitor",
+  "weeklyThemes": [
+    "Week 1 Theme: [Write a business-specific theme name and focus]",
+    "Week 2 Theme: [Write a business-specific theme name and focus]",
+    "Week 3 Theme: [Write a business-specific theme name and focus]",
+    "Week 4 Theme: [Write a business-specific theme name and focus]"
+  ],
   "days": [
     {
       "date": "YYYY-MM-DD",
@@ -599,25 +691,21 @@ You MUST respond with valid JSON matching this structure (do not wrap in markdow
       "title": "String - Clear, descriptive task name",
       "dueDate": "YYYY-MM-DD",
       "type": "Shoot" | "Editing" | "Poster" | "Ads" | "Website" | "Printing",
-      "assignedTo": "Bhargav" | "Adhwaryu" | "Pari",
+      "assignedTo": "",
       "priority": "Low" | "Medium" | "High",
       "notes": "Actionable creative brief or execution checklist."
     }
   ]
 }`;
 
-      const response = await aiInstance.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json'
-        }
+      const response = await generateContentWithRetry(aiInstance, prompt, {
+        responseMimeType: 'application/json'
       });
 
       const responseText = response.text;
       console.log(`[Gemini API] Strategy generated successfully!`);
       
-      const parsedData = JSON.parse(responseText);
+      const parsedData = cleanAndParseJSON(responseText);
       return res.json({
         success: true,
         data: parsedData

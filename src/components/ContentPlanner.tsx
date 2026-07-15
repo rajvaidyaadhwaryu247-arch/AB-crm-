@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { Client, ContentPlanner as IContentPlanner, DayPlan, DailyActivity, ActivityProof } from '../types';
 import {
@@ -73,7 +73,7 @@ interface ContentPlannerProps {
 }
 
 export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
-  const { updateClient, brandSettings } = useCRM();
+  const { updateClient, brandSettings, addTask, tasks, sendTelegramNotification } = useCRM();
 
   // Selected Date state
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -95,6 +95,10 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
   
   // Active proof of work editor state
   const [activeProofActivityId, setActiveProofActivityId] = useState<string | null>(null);
+
+  // Moving activity states
+  const [movingActivityId, setMovingActivityId] = useState<string | null>(null);
+  const [movingTargetDate, setMovingTargetDate] = useState<string>(selectedDate);
 
   // States for Plan Settings Panel
   const [planDuration, setPlanDuration] = useState<'7 Days' | '15 Days' | '30 Days' | 'Custom'>('30 Days');
@@ -164,6 +168,74 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
     }
   };
 
+  // Premium AI Strategy Parameters
+  const [businessType, setBusinessType] = useState(client.businessName || '');
+  const [packageNameState, setPackageNameState] = useState(client.packageDetails?.customName || client.packageDetails?.type || 'Custom');
+  const [campaignGoal, setCampaignGoal] = useState('Brand Awareness & Customer Acquisition');
+  const [campaignBudget, setCampaignBudget] = useState(client.packageDetails?.price ? `₹${client.packageDetails.price}` : 'Standard');
+  const [campaignSeason, setCampaignSeason] = useState('Normal Season');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Sync inputs with active client
+  useEffect(() => {
+    if (client) {
+      setBusinessType(client.businessName || '');
+      setPackageNameState(client.packageDetails?.customName || client.packageDetails?.type || 'Custom');
+      setCampaignGoal('Brand Awareness & Customer Acquisition');
+      setCampaignBudget(client.packageDetails?.price ? `₹${client.packageDetails.price}` : 'Standard');
+      setCampaignSeason('Normal Season');
+    }
+  }, [client.id]);
+
+  // Check and automatically mark past incomplete deliverables as "Overdue"
+  const checkAndMarkOverdue = async () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+
+    let hasChanges = false;
+    const updatedDays = { ...daysData };
+
+    Object.keys(updatedDays).forEach(dateKey => {
+      if (dateKey < todayStr) {
+        const dayPlan = updatedDays[dateKey];
+        if (dayPlan && Array.isArray(dayPlan.activities)) {
+          const updatedActivities = dayPlan.activities.map(act => {
+            if (act.status === 'Planned' || act.status === 'In Progress') {
+              hasChanges = true;
+              return { ...act, status: 'Overdue' as any };
+            }
+            return act;
+          });
+          if (hasChanges) {
+            updatedDays[dateKey] = {
+              ...dayPlan,
+              activities: updatedActivities
+            };
+          }
+        }
+      }
+    });
+
+    if (hasChanges) {
+      const updated = {
+        ...planner,
+        days: updatedDays
+      };
+      await savePlanner(updated);
+      showToast("⏰ Automatically marked past pending items as Overdue.", "success");
+    }
+  };
+
+  // Run overdue scan whenever client or planner changes
+  useEffect(() => {
+    if (Object.keys(daysData).length > 0) {
+      checkAndMarkOverdue();
+    }
+  }, [client.id, Object.keys(daysData).length]);
+
   // Set package duration and bounds
   const handleSavePlanSettings = async () => {
     let start = todayStr;
@@ -201,8 +273,9 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
     showToast(`📅 Content plan set for ${planDuration}!`, "success");
   };
 
-  // Generate Plan Template
+  // Generate Premium AI Agency Plan Template
   const handleGenerateTemplate = async () => {
+    setIsGenerating(true);
     let start = planner.startDate || todayStr;
     let end = planner.endDate || todayStr;
 
@@ -218,103 +291,130 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
     const diffTime = Math.abs(endD.getTime() - startD.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-    const newDays: Record<string, DayPlan> = { ...daysData };
-
-    // Loop through each day of the duration and pre-populate
+    const datesList: string[] = [];
     for (let i = 0; i < diffDays; i++) {
       const currentD = new Date(startD);
       currentD.setDate(startD.getDate() + i);
-      const dateStr = currentD.toISOString().split('T')[0];
-      const dayOfWeek = currentD.getDay(); // 0 is Sunday, 6 is Saturday
-
-      const dayActivities: DailyActivity[] = [];
-
-      // Daily Base Activities: Instagram Story, Facebook Story, WhatsApp Status
-      dayActivities.push({
-        id: `story-ig-${dateStr}-${i}`,
-        type: 'Instagram Story',
-        status: 'Planned'
-      });
-      dayActivities.push({
-        id: `story-fb-${dateStr}-${i}`,
-        type: 'Facebook Story',
-        status: 'Planned'
-      });
-      dayActivities.push({
-        id: `status-wa-${dateStr}-${i}`,
-        type: 'WhatsApp Status',
-        status: 'Planned'
-      });
-
-      // 2 Reels per week (e.g. Wednesday [day 3] and Friday [day 5])
-      if (dayOfWeek === 3 || dayOfWeek === 5) {
-        dayActivities.push({
-          id: `reel-ig-${dateStr}-${i}`,
-          type: 'Instagram Reel',
-          status: 'Planned'
-        });
-        dayActivities.push({
-          id: `reel-fb-${dateStr}-${i}`,
-          type: 'Facebook Reel',
-          status: 'Planned'
-        });
-      }
-
-      // 2 Posts per week (e.g. Tuesday [day 2] and Thursday [day 4])
-      if (dayOfWeek === 2 || dayOfWeek === 4) {
-        dayActivities.push({
-          id: `post-ig-${dateStr}-${i}`,
-          type: 'Instagram Post',
-          status: 'Planned'
-        });
-        dayActivities.push({
-          id: `post-fb-${dateStr}-${i}`,
-          type: 'Facebook Post',
-          status: 'Planned'
-        });
-      }
-
-      // Meta Ads running (let's put every day)
-      dayActivities.push({
-        id: `ads-meta-${dateStr}-${i}`,
-        type: 'Meta Ads',
-        status: 'Planned'
-      });
-
-      // Weekly Review (on Sundays or every 7 days relative to start)
-      if (i > 0 && i % 7 === 0) {
-        dayActivities.push({
-          id: `review-${dateStr}-${i}`,
-          type: 'Meeting',
-          status: 'Planned',
-          notes: 'Weekly Strategic Review'
-        });
-      }
-
-      const existingActivities = newDays[dateStr]?.activities || [];
-      const updatedActivities = [...existingActivities];
-
-      dayActivities.forEach(act => {
-        if (!updatedActivities.some(existing => existing.id === act.id)) {
-          updatedActivities.push(act);
-        }
-      });
-
-      newDays[dateStr] = {
-        date: dateStr,
-        activities: updatedActivities,
-        internalNotes: newDays[dateStr]?.internalNotes || '',
-        clientNotes: newDays[dateStr]?.clientNotes || ''
-      };
+      datesList.push(currentD.toISOString().split('T')[0]);
     }
 
-    const updated: IContentPlanner = {
-      ...planner,
-      days: newDays
-    };
+    try {
+      const response = await fetch('/api/gemini/generate-planner', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          businessType,
+          packageName: packageNameState,
+          goal: campaignGoal,
+          budget: campaignBudget,
+          startDate: start,
+          endDate: end,
+          datesList,
+          season: campaignSeason
+        })
+      });
 
-    await savePlanner(updated);
-    showToast("⚡ Fully populated calendar template generated successfully!", "success");
+      if (!response.ok) {
+        throw new Error(`Server responded with status ${response.status}`);
+      }
+
+      const json = await response.json();
+      if (!json.success || !json.data) {
+        throw new Error(json.error || 'Failed to generate plan via AI engine');
+      }
+
+      const aiData = json.data;
+      const generatedDaysList = aiData.days || [];
+      const newDays: Record<string, DayPlan> = { ...daysData };
+
+      generatedDaysList.forEach((aiDay: any) => {
+        const dateStr = aiDay.date;
+        const existingDay = daysData[dateStr];
+        const existingActivities = existingDay?.activities || [];
+
+        // Preserve any completed or approved activities
+        const completedActivities = existingActivities.filter(a => 
+          a.status === 'Completed' || a.status === 'Posted' || a.status === 'Approved' || a.status === 'Waiting For Client Approval'
+        );
+
+        // Map the new AI generated activities
+        const newActivities = (aiDay.activities || []).map((aiAct: any, idx: number) => ({
+          id: aiAct.id || `act-ai-${dateStr}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+          type: aiAct.type,
+          customTypeName: aiAct.customTypeName,
+          notes: aiAct.notes || '',
+          status: 'Planned' as const
+        }));
+
+        // Merge: keep all completed ones, and append new ones if they don't have duplicates
+        const mergedActivities = [...completedActivities];
+        newActivities.forEach((act: any) => {
+          if (!mergedActivities.some(m => m.type === act.type)) {
+            mergedActivities.push(act);
+          }
+        });
+
+        newDays[dateStr] = {
+          date: dateStr,
+          activities: mergedActivities,
+          internalNotes: aiDay.internalNotes || existingDay?.internalNotes || '',
+          clientNotes: aiDay.clientNotes || existingDay?.clientNotes || ''
+        };
+      });
+
+      // Synchronize with Tasks workspace - Create operational deliverables tasks assigned to team members
+      const aiTasks = aiData.tasks || [];
+      for (const t of aiTasks) {
+        // Prevent duplicate task creation for this client
+        const isDuplicate = tasks.some(existing => 
+          existing.clientId === client.id && 
+          existing.title.toLowerCase() === t.title.toLowerCase() && 
+          existing.dueDate === t.dueDate
+        );
+
+        if (!isDuplicate) {
+          await addTask(
+            t.title,
+            t.dueDate,
+            t.type || 'Poster',
+            'Pending',
+            client.id,
+            client.name,
+            t.notes,
+            undefined,
+            undefined,
+            undefined, // AI must NEVER assign team members, let owner assign!
+            t.priority || 'Medium',
+            t.plannerActivityId || `task-ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+          );
+        }
+      }
+
+      // Save content planner along with strategic visual parameters in the database
+      const updated: IContentPlanner = {
+        ...planner,
+        planType: planDuration,
+        startDate: start,
+        endDate: end,
+        days: newDays,
+        aiStrategy: {
+          strategyTitle: aiData.strategyTitle || `${businessType} Campaign Strategy`,
+          highLevelStrategy: aiData.highLevelStrategy || 'AI Strategized Campaign Planner',
+          keyMetrics: aiData.keyMetrics || 'KPIs: Followers Growth, Lead Conversions',
+          weeklyThemes: aiData.weeklyThemes || []
+        } as any
+      };
+
+      await savePlanner(updated);
+      showToast("⚡ Premium AI Campaign Strategy & Daily Calendar compiled successfully!", "success");
+    } catch (err: any) {
+      console.error("Gemini Premium Planner compilation failure:", err);
+      showToast(`❌ AI Generation Error: ${err.message || 'Connection lost'}`, "error");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // Add a single custom activity
@@ -426,6 +526,47 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
     });
 
     showToast("Status synchronized successfully!", "success");
+  };
+
+  // Move activity to a different date
+  const handleMoveActivity = async (activityId: string, fromDate: string, toDate: string) => {
+    if (!fromDate || !toDate || fromDate === toDate) {
+      showToast("⚠️ Target date must be different.", "error");
+      return;
+    }
+
+    const sourceDayPlan = daysData[fromDate];
+    if (!sourceDayPlan) return;
+
+    const matchedActivity = sourceDayPlan.activities.find(a => a.id === activityId);
+    if (!matchedActivity) return;
+
+    // Remove from source date
+    const updatedSourceActivities = sourceDayPlan.activities.filter(a => a.id !== activityId);
+    
+    // Add to target date
+    const targetDayPlan = daysData[toDate] || { date: toDate, activities: [] };
+    const updatedTargetActivities = [...(targetDayPlan.activities || []), matchedActivity];
+
+    const updatedDays = {
+      ...daysData,
+      [fromDate]: {
+        ...sourceDayPlan,
+        activities: updatedSourceActivities
+      },
+      [toDate]: {
+        ...targetDayPlan,
+        activities: updatedTargetActivities
+      }
+    };
+
+    await savePlanner({
+      ...planner,
+      days: updatedDays
+    });
+
+    setMovingActivityId(null);
+    showToast(`✈️ Moved deliverable to ${new Date(toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}!`, "success");
   };
 
   // Save Notes (Internal / Client)
@@ -1178,6 +1319,71 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
               )}
             </div>
 
+            {/* Premium AI Planner Campaign Parameters */}
+            <div className="border border-indigo-950/20 bg-[#0d0d0d]/80 p-4 rounded-xl space-y-3">
+              <h5 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" /> Premium AI Agency Strategy Parameters
+              </h5>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-gray-500 text-[9px] uppercase font-bold block mb-0.5">Business Type / Niche</label>
+                  <input
+                    type="text"
+                    value={businessType}
+                    onChange={(e) => setBusinessType(e.target.value)}
+                    placeholder="e.g., Dental Clinic, Gym, Realtor"
+                    className="w-full bg-[#141414] border border-slate-800 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-500 text-[9px] uppercase font-bold block mb-0.5">Service Package</label>
+                  <input
+                    type="text"
+                    value={packageNameState}
+                    onChange={(e) => setPackageNameState(e.target.value)}
+                    placeholder="e.g., Diamond Retainer"
+                    className="w-full bg-[#141414] border border-slate-800 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-500 text-[9px] uppercase font-bold block mb-0.5">Campaign Goal</label>
+                  <input
+                    type="text"
+                    value={campaignGoal}
+                    onChange={(e) => setCampaignGoal(e.target.value)}
+                    placeholder="e.g., Increase walk-ins"
+                    className="w-full bg-[#141414] border border-slate-800 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-500 text-[9px] uppercase font-bold block mb-0.5">Budget Bracket</label>
+                  <input
+                    type="text"
+                    value={campaignBudget}
+                    onChange={(e) => setCampaignBudget(e.target.value)}
+                    placeholder="e.g., ₹30,000 / month"
+                    className="w-full bg-[#141414] border border-slate-800 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-gray-500 text-[9px] uppercase font-bold block mb-0.5">Season / Occasion</label>
+                  <select
+                    value={campaignSeason}
+                    onChange={(e) => setCampaignSeason(e.target.value)}
+                    className="w-full bg-[#141414] border border-slate-800 rounded-xl px-3 py-1.5 text-white text-xs focus:outline-none"
+                  >
+                    <option value="Normal Season">Normal Season / Ever-Green Content</option>
+                    <option value="Festive Season (Diwali / New Year)">Festive Season (Diwali / New Year)</option>
+                    <option value="Summer Campaign">Summer Campaign</option>
+                    <option value="Monsoon / Autumn Launch">Monsoon / Autumn Launch</option>
+                    <option value="Holiday / Gifting Season">Holiday / Gifting Season</option>
+                    <option value="Off-Season Clearance / Promo">Off-Season Clearance / Promo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <button
                 onClick={handleSavePlanSettings}
@@ -1188,17 +1394,63 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
 
               <button
                 onClick={handleGenerateTemplate}
-                className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-600 border border-indigo-500/20 hover:border-indigo-500 text-indigo-400 hover:text-white font-bold rounded-xl text-xs cursor-pointer transition-all flex items-center gap-1.5"
-                title="Generate agency checklist instantly"
+                disabled={isGenerating}
+                className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 border border-indigo-500/20 disabled:bg-indigo-950/20 disabled:text-indigo-600 text-white font-bold rounded-xl text-xs cursor-pointer transition-all flex items-center gap-1.5"
+                title="Generate premium marketing agency checklist using Gemini AI"
               >
-                <RefreshCw className="h-3.5 w-3.5 shrink-0" /> Generate Package Plan
+                <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${isGenerating ? 'animate-spin' : ''}`} /> {isGenerating ? 'AI Generating Planner...' : 'Generate Premium AI Plan'}
               </button>
             </div>
             
             <p className="text-[10px] text-gray-500 italic mt-1 leading-relaxed">
-              * Generate Package Plan sets up a daily calendar with scheduled stories, posts, reels, Meta Ads checks, and weekly reviews.
+              * Click "Generate Premium AI Plan" to use Gemini to compile a unique, highly targeted monthly campaign strategy with coordinated social content themes and team operation assignments.
             </p>
           </div>
+
+          {/* AI CAMPAIGN STRATEGY COMPILER PANEL */}
+          {planner.aiStrategy && (
+            <div className="bg-[#0c0c0c] border border-indigo-950/30 p-5 rounded-2xl space-y-4 shadow-lg shadow-indigo-500/2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-indigo-400" /> Premium AI Agency Strategy Directive
+                </h4>
+                <span className="text-[9px] font-mono font-bold text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-full uppercase">
+                  ACTIVE AI STRATEGY
+                </span>
+              </div>
+              
+              <div className="space-y-3">
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-gray-500 block">Campaign Theme & Core Idea</span>
+                  <h3 className="text-sm font-extrabold text-white tracking-tight mt-0.5">{planner.aiStrategy.strategyTitle}</h3>
+                </div>
+
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-gray-500 block">High-Level Campaign Strategy & Visual Tone</span>
+                  <p className="text-xs text-gray-300 mt-1 leading-relaxed whitespace-pre-wrap">{planner.aiStrategy.highLevelStrategy}</p>
+                </div>
+
+                {planner.aiStrategy.weeklyThemes && planner.aiStrategy.weeklyThemes.length > 0 && (
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-gray-500 block">Weekly Themes & Core Topics Flow</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                      {planner.aiStrategy.weeklyThemes.map((theme, tIdx) => (
+                        <div key={tIdx} className="bg-[#141414]/60 border border-slate-850 p-2.5 rounded-xl text-xs">
+                          <span className="text-[9px] font-bold text-emerald-400 uppercase block">Week {tIdx + 1}</span>
+                          <p className="text-gray-300 mt-0.5 font-medium">{theme}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-gray-500 block">Strategic Key Performance Indicators (KPIs)</span>
+                  <p className="text-xs text-indigo-300/90 mt-1 font-mono">{planner.aiStrategy.keyMetrics}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 2. THE CALENDAR BOARD */}
           <div className="bg-[#0c0c0c] border border-slate-850 p-5 rounded-2xl space-y-4">
@@ -1450,8 +1702,49 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMovingActivityId(movingActivityId === act.id ? null : act.id);
+                                setMovingTargetDate(selectedDate);
+                              }}
+                              className={`p-1 rounded cursor-pointer transition-colors ${movingActivityId === act.id ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-gray-500 hover:text-white'}`}
+                              title="Move deliverable to another date"
+                            >
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
+
+                        {/* Move Activity inline panel */}
+                        {movingActivityId === act.id && (
+                          <div className="bg-[#0c0c0c] border border-slate-800 p-2.5 rounded-lg space-y-2 mt-1">
+                            <span className="text-[9px] uppercase font-bold text-emerald-400 block font-mono">Move Deliverable to another Date</span>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="date"
+                                value={movingTargetDate}
+                                onChange={(e) => setMovingTargetDate(e.target.value)}
+                                className="bg-[#141414] border border-slate-800 text-xs rounded px-2 py-1 text-white focus:outline-none flex-1 font-mono"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleMoveActivity(act.id, selectedDate, movingTargetDate)}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-2.5 py-1 rounded text-[10px] cursor-pointer font-sans"
+                              >
+                                Move
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMovingActivityId(null)}
+                                className="bg-slate-800 hover:bg-slate-700 text-gray-400 px-2 py-1 rounded text-[10px] cursor-pointer font-sans"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Expand Proof Section */}
                         <div className="pt-1.5 border-t border-slate-850 flex items-center justify-between text-[10px]">
@@ -1610,8 +1903,49 @@ export const ContentPlanner: React.FC<ContentPlannerProps> = ({ client }) => {
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMovingActivityId(movingActivityId === act.id ? null : act.id);
+                                setMovingTargetDate(selectedDate);
+                              }}
+                              className={`p-1 rounded cursor-pointer transition-colors ${movingActivityId === act.id ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-slate-800 text-gray-500 hover:text-white'}`}
+                              title="Move deliverable to another date"
+                            >
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
+
+                        {/* Move Activity inline panel */}
+                        {movingActivityId === act.id && (
+                          <div className="bg-[#0c0c0c] border border-slate-800 p-2.5 rounded-lg space-y-2 mt-1">
+                            <span className="text-[9px] uppercase font-bold text-emerald-400 block font-mono">Move Deliverable to another Date</span>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="date"
+                                value={movingTargetDate}
+                                onChange={(e) => setMovingTargetDate(e.target.value)}
+                                className="bg-[#141414] border border-slate-800 text-xs rounded px-2 py-1 text-white focus:outline-none flex-1 font-mono"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleMoveActivity(act.id, selectedDate, movingTargetDate)}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-2.5 py-1 rounded text-[10px] cursor-pointer font-sans"
+                              >
+                                Move
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMovingActivityId(null)}
+                                className="bg-slate-800 hover:bg-slate-700 text-gray-400 px-2 py-1 rounded text-[10px] cursor-pointer font-sans"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Proof of Work Display */}
                         {act.proof && (

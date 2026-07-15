@@ -39,7 +39,7 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
     { name: 'Dashboard', value: 'dashboard' as const, icon: LayoutDashboard },
     { name: 'Client Management', value: 'clients' as const, icon: Users },
     { name: 'Lead Management', value: 'leads' as const, icon: Sparkles },
-    { name: 'Task Management', value: 'tasks' as const, icon: ClipboardList },
+    { name: 'Team Workspace', value: 'tasks' as const, icon: ClipboardList },
     { name: 'Reports', value: 'reports' as const, icon: BarChart3 },
     { name: 'Settings', value: 'telegram' as const, icon: Settings },
   ];
@@ -224,7 +224,23 @@ export const CRMLayout: React.FC<CRMLayoutProps> = ({
             </h1>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Quick Service omnipresent action */}
+            <button
+              onClick={() => {
+                setActiveTab('clients');
+                if (typeof window !== 'undefined') {
+                  (window as any).openQuickServicePending = true;
+                  window.dispatchEvent(new CustomEvent('open-quick-service'));
+                }
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-bold rounded-xl text-xs tracking-wider transition-all shadow-md shadow-emerald-500/5 cursor-pointer hover:scale-105 active:scale-95 duration-200 shrink-0"
+            >
+              <span className="text-sm">⚡</span>
+              <span className="hidden xs:inline">Quick Service</span>
+              <span className="xs:hidden">Quick</span>
+            </button>
+
             {/* Quick stats indicator */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
